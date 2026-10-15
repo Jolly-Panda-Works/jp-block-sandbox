@@ -1,6 +1,6 @@
 import { Client, type Room } from 'colyseus.js';
 import {
-  AIR, EMOJIS, PROTOCOL_VERSION, getBlock, sanitizeAppearance, sanitizeProfile,
+  AIR, ANIMAL_SOUND, EMOJIS, PROTOCOL_VERSION, getBlock, isAnimalKind, sanitizeAppearance, sanitizeProfile,
   type ClientMessages, type JoinOptions, type PlayerMeta, type PlayerSnapshot, type ProfileData, type ServerMessages,
   type MgLobby, type MgListing, type MgView, type MiniGameKind,
 } from '@jp/blocksy-shared';
@@ -27,9 +27,9 @@ type StatePlayer = PlayerSnapshot & { inv?: MiniGameKind | ''; invAgeMs?: number
 export const remotes = new Map<string, RemoteState>();
 
 /** Latest replicated animal transforms; r* fields are interpolated render values. */
-export interface AnimalState { kind: string; x: number; y: number; z: number; yaw: number; moving: boolean; rx: number; ry: number; rz: number; ryaw: number }
+export interface AnimalState { kind: string; variant: string; x: number; y: number; z: number; yaw: number; moving: boolean; rx: number; ry: number; rz: number; ryaw: number; hopAt?: number }
 export const animalStates = new Map<string, AnimalState>();
-type AnimalSnapshot = { id: string; kind: string; x: number; y: number; z: number; yaw: number; moving: boolean };
+type AnimalSnapshot = { id: string; kind: string; variant: string; x: number; y: number; z: number; yaw: number; moving: boolean };
 
 /** Extra fields the Rastaar server adds to every `state` message. */
 type StateMessage = Omit<ServerMessages['state'], 'players'> & { players: StatePlayer[]; phase?: 'playing' | 'finished'; timeLeftMs?: number; games?: MgListing[]; acceptDelayMs?: number; animals?: AnimalSnapshot[] };
@@ -239,7 +239,7 @@ function attach(r: Room): void {
       if (s) Object.assign(s, a);
       else animalStates.set(a.id, { ...a, rx: a.x, ry: a.y, rz: a.z, ryaw: a.yaw });
     }
-    if (animals.length !== get().animals.length) set({ animals: animals.map((a) => ({ id: a.id, kind: a.kind })) });
+    if (animals.length !== get().animals.length) set({ animals: animals.map((a) => ({ id: a.id, kind: a.kind, variant: a.variant })) });
     const games = m.games ?? [];
     if (JSON.stringify(games) !== JSON.stringify(get().games)) set({ games });
     if (delay !== get().acceptDelayMs) set({ acceptDelayMs: delay });
@@ -289,6 +289,14 @@ function attach(r: Room): void {
     if (m && m.hostId !== r.sessionId && !prev) { releasePointer(); set({ tool: 'none', panel: 'none' }); }
   });
   r.onMessage('mgError', (m: { message: string }) => get().showToast(m.message));
+
+  // ---- animals: someone petted one → it hops and shows a heart and its sound ----
+  r.onMessage('animal', (m: { id: string; by: string; kind: string }) => {
+    const a = animalStates.get(m.id);
+    if (a) a.hopAt = performance.now() / 1000;
+    const kind = isAnimalKind(m.kind) ? m.kind : null;
+    get().showBubble(m.id, { text: `❤️ ${kind ? ANIMAL_SOUND[kind] : ''}` }, 2.5);
+  });
   r.onMessage('sessionEnded', () => {
     sessionEnded = true;
     set({ sessionEnded: true, timeLeftMs: 0, panel: 'none' });

@@ -30,7 +30,7 @@ export function Environment({ layout }: { layout: IslandLayout }) {
   return (
     <>
       <color attach="background" args={['#86c4ff']} />
-      <fog attach="fog" args={['#a9d4fb', 60, 175]} />
+      <fog attach="fog" args={['#a9d4fb', 75, 220]} />
       <hemisphereLight args={['#e3f1ff', '#8a7558', 1.3]} />
       <ambientLight intensity={0.6} />
       <directionalLight

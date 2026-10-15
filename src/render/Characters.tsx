@@ -118,12 +118,22 @@ export function GameCenterNpcs({ layout }: { layout: IslandLayout }) {
   return (
     <>
       {layout.gameCenter.npcs.filter((n) => !busy.has(n.id)).map((n) => (
-        <group key={n.id} position={[n.x, n.y, n.z]} rotation={[0, n.yaw, 0]}>
-          <Avatar appearance={looks.get(n.id)!} anim={getAnim(n.id)} />
-          <Label id={n.id} name={`🤖 ${n.name}`} invite={n.kind} />
-        </group>
+        <IdleNpc key={n.id} id={n.id} name={n.name} kind={n.kind} x={n.x} y={n.y} z={n.z} yaw={n.yaw} look={looks.get(n.id)!} />
       ))}
     </>
+  );
+}
+
+/** A Game Center character at its spot. Its pose is refreshed every frame, so after a game it stands up
+ *  and goes back to idle (previously it kept the seated / Rock-Paper-Scissors pose). */
+function IdleNpc({ id, name, kind, x, y, z, yaw, look }: { id: string; name: string; kind: MiniGameKind; x: number; y: number; z: number; yaw: number; look: ReturnType<typeof botLook> }) {
+  const anim = getAnim(id);
+  useFrame(() => applyGamePose(id, anim, useGame.getState().games));
+  return (
+    <group position={[x, y, z]} rotation={[0, yaw, 0]}>
+      <Avatar appearance={look} anim={anim} />
+      <Label id={id} name={`🤖 ${name}`} invite={kind} />
+    </group>
   );
 }
 

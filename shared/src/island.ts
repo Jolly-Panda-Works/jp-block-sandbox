@@ -4,6 +4,7 @@ import { BlockGrid } from './grid';
 import { createRng, randInt } from './rng';
 import type { ShopCategory } from './blocks';
 import type { GameCenterNpc, MiniGameKind } from './minigames';
+import type { Biome } from './animals';
 
 export interface Vec3 { x: number; y: number; z: number }
 export interface StallInfo {
@@ -25,6 +26,8 @@ export interface IslandLayout {
   lanterns: [number, number, number][];
   /** Fenced area with NPCs that play the popup mini-games. */
   gameCenter: { x: number; y: number; z: number; npcs: GameCenterNpc[] };
+  /** Animal homes: centre and radius of each biome that was built. */
+  biomes: { biome: Biome; x: number; y: number; z: number; r: number }[];
 }
 
 export const createWorldGrid = (): BlockGrid => new BlockGrid(WORLD_SIZE.x, WORLD_SIZE.y, WORLD_SIZE.z);
@@ -35,7 +38,7 @@ export const createWorldGrid = (): BlockGrid => new BlockGrid(WORLD_SIZE.x, WORL
  * (Blocks, Decor) with striped awnings, fenced "Build Here" plots, trees, lantern posts, a dock and
  * floating islets. Yaw is in radians; yaw 0 faces +Z.
  */
-export function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
+export function generateIsland(grid: BlockGrid, seed: number, opts: { biomes?: readonly Biome[] } = {}): IslandLayout {
   const rng = createRng(seed);
   const CX = Math.floor(grid.sx / 2), CZ = Math.floor(grid.sz / 2);
   const S = SURFACE_Y;
@@ -47,13 +50,15 @@ export function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
     flowerW: blockId('white_flower'), flowerY: blockId('yellow_flower'), sand: blockId('sand'),
     teal: blockId('teal_wool'), red: blockId('red_wool'), white: blockId('white_wool'), glass: blockId('glass'),
     craft: blockId('crafting_table'), chest: blockId('chest'),
+    water: blockId('water'), hay: blockId('hay'), hive: blockId('beehive'), spruceLog: blockId('spruce_log'),
+    spruceLeaves: blockId('spruce_leaves'), bamboo: blockId('bamboo'),
   };
   const island = new Uint8Array(grid.sx * grid.sz);
   const reserved = new Uint8Array(grid.sx * grid.sz);
   const layout: IslandLayout = {
     spawn: { x: CX + 0.5, y: S + 1, z: CZ - 15 + 0.5, yaw: 0 },
     center: { x: CX + 0.5, y: S + 1, z: CZ + 0.5 },
-    waterLevel: WATER_LEVEL, stalls: [], signs: [], lanterns: [], gameCenter: { x: 0, y: 0, z: 0, npcs: [] },
+    waterLevel: WATER_LEVEL, stalls: [], signs: [], lanterns: [], gameCenter: { x: 0, y: 0, z: 0, npcs: [] }, biomes: [],
   };
 
   const col = (x: number, z: number) => z * grid.sx + x;
@@ -77,7 +82,7 @@ export function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
   for (let x = 0; x < grid.sx; x++) for (let z = 0; z < grid.sz; z++) {
     const dx = x - CX, dz = z - CZ;
     const dist = Math.hypot(dx, dz), a = Math.atan2(dz, dx);
-    const r = 25.5 + 2.2 * Math.sin(3 * a + p1) + 1.5 * Math.sin(5 * a + p2) + 0.9 * Math.sin(7 * a + p3);
+    const r = 47 + 1.6 * Math.sin(3 * a + p1) + 1.0 * Math.sin(5 * a + p2) + 0.6 * Math.sin(7 * a + p3);
     if (dist > r) continue;
     island[col(x, z)] = 1;
     grid.setSilent(x, 0, z, B.core);
@@ -214,6 +219,108 @@ export function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
     };
   }
 
+  // --- animal biomes around the village (only the ones requested) ---
+  const want = new Set<Biome>(opts.biomes ?? ['village', 'farm', 'bamboo', 'forest', 'pond', 'flowers', 'highlands']);
+  const home = (biome: Biome, dx: number, dz: number, r: number) =>
+    layout.biomes.push({ biome, x: CX + dx + 0.5, y: S + 1, z: CZ + dz + 0.5, r });
+  const clearAbove = (dx: number, dz: number, h = 6) => { for (let y = S + 1; y <= S + h; y++) set(dx, y, dz, AIR); };
+  home('village', 0, -4, 16);
+
+  if (want.has('farm')) {               // fenced pasture with hay bales and a chicken coop
+    const fx = -29, fz = 15, R = 8;
+    for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
+      const x = fx + dx, z = fz + dz;
+      if (!inIsland(x, z)) continue;
+      reserve(x, z); clearAbove(x, z);
+      const edge = Math.abs(dx) === R || Math.abs(dz) === R, gate = dx === R && Math.abs(dz) <= 1;
+      if (edge && !gate) set(x, S + 1, z, B.fence);
+    }
+    for (const [dx, dz, h] of [[3, -4, 2], [4, -4, 1], [-2, 3, 1], [5, 4, 2]]) for (let k = 1; k <= h; k++) set(fx + dx, S + k, fz + dz, B.hay);
+    const cx0 = fx - R + 1, cz0 = fz + R - 4;   // coop
+    for (let dx = 0; dx < 3; dx++) for (let dz = 0; dz < 3; dz++) {
+      set(cx0 + dx, S, cz0 + dz, B.planks);
+      set(cx0 + dx, S + 3, cz0 + dz, B.dark);
+      if (dz === 2 || dx === 0) for (let y = S + 1; y <= S + 2; y++) set(cx0 + dx, y, cz0 + dz, B.planks);
+    }
+    set(cx0 + 2, S + 1, cz0, B.hay);
+    home('farm', fx, fz, R - 1);
+  }
+
+  if (want.has('bamboo')) {             // dense bamboo grove
+    const bx = 29, bz = 23, R = 8;
+    for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
+      const x = bx + dx, z = bz + dz;
+      if (dx * dx + dz * dz > R * R || !inIsland(x, z)) continue;
+      reserve(x, z); clearAbove(x, z, 8);
+      if (rng() < 0.3 && get(x, S, z) === B.grass) { const h = 3 + randInt(rng, 4); for (let k = 1; k <= h; k++) set(x, S + k, z, B.bamboo); }
+    }
+    home('bamboo', bx, bz, R);
+  }
+
+  if (want.has('forest')) {             // spruce forest
+    const sx0 = 31, sz0 = -17, R = 10;
+    for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) if (dx * dx + dz * dz <= R * R) reserve(sx0 + dx, sz0 + dz);
+    const placed: [number, number][] = [];
+    for (let i = 0; i < 120 && placed.length < 14; i++) {
+      const dx = randInt(rng, 2 * R + 1) - R, dz = randInt(rng, 2 * R + 1) - R;
+      const x = sx0 + dx, z = sz0 + dz;
+      if (dx * dx + dz * dz > (R - 1) ** 2 || !inIsland(x, z) || get(x, S, z) !== B.grass) continue;
+      if (placed.some(([px, pz]) => (px - x) ** 2 + (pz - z) ** 2 < 12)) continue;
+      placed.push([x, z]);
+      const h = 5 + randInt(rng, 3);
+      set(x, S, z, B.dirt);
+      for (let k = 1; k <= h; k++) set(x, S + k, z, B.spruceLog);
+      const radii = [2, 2, 1, 1, 0];
+      radii.forEach((rad, i2) => {
+        const y = S + h - 2 + i2;
+        for (let ox = -rad; ox <= rad; ox++) for (let oz = -rad; oz <= rad; oz++) {
+          if (Math.abs(ox) + Math.abs(oz) > rad + 1) continue;
+          if (grid.get(CX + x + ox, y, CZ + z + oz) === AIR) set(x + ox, y, z + oz, B.spruceLeaves);
+        }
+      });
+      set(x, S + h + 1, z, B.spruceLeaves);
+    }
+    home('forest', sx0, sz0, R);
+  }
+
+  if (want.has('pond')) {               // pond with a sandy shore
+    const px = -27, pz = -23, rx = 7, rz = 5;
+    for (let dx = -rx - 2; dx <= rx + 2; dx++) for (let dz = -rz - 2; dz <= rz + 2; dz++) {
+      const x = px + dx, z = pz + dz, d = (dx * dx) / (rx * rx) + (dz * dz) / (rz * rz);
+      if (d > 1.5 || !inIsland(x, z)) continue;
+      reserve(x, z); clearAbove(x, z);
+      if (d <= 1) { set(x, S, z, B.water); set(x, S - 1, z, B.water); set(x, S - 2, z, B.sand); }
+      else set(x, S, z, B.sand);
+    }
+    home('pond', px, pz, Math.max(rx, rz) + 1);
+  }
+
+  if (want.has('flowers')) {            // flower meadow with beehives on posts
+    const mx = 0, mz = -37, R = 8;
+    for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
+      const x = mx + dx, z = mz + dz;
+      if (dx * dx + dz * dz > R * R || !inIsland(x, z)) continue;
+      reserve(x, z); clearAbove(x, z);
+      if (get(x, S, z) === B.grass && rng() < 0.5) set(x, S + 1, z, rng() < 0.5 ? B.flowerW : rng() < 0.7 ? B.flowerY : B.tall);
+    }
+    for (const [dx, dz] of [[-3, 2], [3, 3], [0, -4]]) { set(mx + dx, S + 1, mz + dz, B.fence); set(mx + dx, S + 2, mz + dz, B.hive); }
+    home('flowers', mx, mz, R);
+  }
+
+  if (want.has('highlands')) {          // stepped grassy hills with boulders
+    const hx = 0, hz = 37, R = 9;
+    for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
+      const x = hx + dx, z = hz + dz, d = Math.hypot(dx, dz) / R;
+      if (d > 1 || !inIsland(x, z)) continue;
+      reserve(x, z); clearAbove(x, z, 8);
+      const levels = d < 0.3 ? 3 : d < 0.6 ? 2 : d < 0.85 ? 1 : 0;
+      for (let k = 0; k < levels; k++) set(x, S + k, z, k === 0 ? B.dirt : B.stone);
+      set(x, S + levels, z, B.grass);
+      if (levels > 0 && rng() < 0.04) set(x, S + levels + 1, z, B.cobble);
+    }
+    home('highlands', hx, hz, R);
+  }
+
   // --- dock ---
   const dz0 = -14;
   let shore = 0;
@@ -268,8 +375,8 @@ export function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
     }
   };
   const trees: [number, number][] = [[0, 14]];
-  for (let attempt = 0; trees.length < 14 && attempt < 400; attempt++) {
-    const a = rng() * Math.PI * 2, r = 6 + rng() * 16;
+  for (let attempt = 0; trees.length < 34 && attempt < 900; attempt++) {
+    const a = rng() * Math.PI * 2, r = 6 + rng() * 36;
     const tx = Math.round(Math.cos(a) * r), tz = Math.round(Math.sin(a) * r);
     if (!inIsland(tx, tz) || isReserved(tx, tz, 2) || get(tx, S, tz) !== B.grass) continue;
     if (trees.some(([px, pz]) => (px - tx) ** 2 + (pz - tz) ** 2 < 36)) continue;
@@ -278,7 +385,7 @@ export function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
 
   // --- floating islets ---
   for (const a of [0.7, 2.1, 3.7, 5.1]) {
-    const ix = CX + Math.round(Math.cos(a) * 43), iz = CZ + Math.round(Math.sin(a) * 43);
+    const ix = CX + Math.round(Math.cos(a) * 70), iz = CZ + Math.round(Math.sin(a) * 70);
     const top = 8 + randInt(rng, 5), radius = 4 + rng() * 2;
     for (let layer = 0; layer <= 6; layer++) {
       const r = radius - layer * 0.85;

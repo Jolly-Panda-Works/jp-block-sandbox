@@ -8,7 +8,7 @@ import { lockPointer, togglePanel } from '../game/pointer';
 import { LookArea, TouchControls } from './TouchControls';
 import { MiniGameOverlay } from './MiniGameOverlay';
 import { send } from '../net/network';
-import { isBotId, miniGameInfo } from '@jp/blocksy-shared';
+import { ANIMAL_ICON, isAnimalKind, isBotId, miniGameInfo } from '@jp/blocksy-shared';
 
 /** E near an invite → accept (after the delay); near a running game → watch. Returns true if handled. */
 export function interactMiniGame(): boolean {
@@ -21,6 +21,7 @@ export function interactMiniGame(): boolean {
   }
   if (s.nearNpc) { send('mgNpc', { npcId: s.nearNpc.id }); return true; }
   if (s.nearGame) { send('mgSpectate', { gameId: s.nearGame.id }); return true; }
+  if (s.nearAnimal) { send('pet', { animalId: s.nearAnimal.id }); return true; }
   return false;
 }
 
@@ -83,7 +84,12 @@ export function Hud() {
           <Keycap k="E" /> 👁 Watch {miniGameInfo(s.nearGame.kind).name}
         </button>
       )}
-      {s.nearbyStall && playing && !s.touch && !s.nearInvite && !s.nearGame && !s.nearNpc && <div className="card prompt"><Keycap k="E" /> Open {s.nearbyStall.title} shop</div>}
+      {playing && !s.mg && !s.nearInvite && !s.nearNpc && !s.nearGame && s.nearAnimal && (
+        <button className="card prompt mg-prompt" onClick={() => interactMiniGame()}>
+          <Keycap k="E" /> {isAnimalKind(s.nearAnimal.kind) ? ANIMAL_ICON[s.nearAnimal.kind] : ''} Pet the {s.nearAnimal.kind}
+        </button>
+      )}
+      {s.nearbyStall && playing && !s.touch && !s.nearInvite && !s.nearGame && !s.nearNpc && !s.nearAnimal && <div className="card prompt"><Keycap k="E" /> Open {s.nearbyStall.title} shop</div>}
       <SelfBubble />
       <Toast />
       {s.showHints && !s.touch && (

@@ -123,3 +123,32 @@ test('island: game center with four NPCs on a clear floor', () => {
   }
   assert.ok(layout.signs.some((s) => s.text === 'Game Center'));
 });
+
+import { parseAnimalSetting, biomesFor, ANIMAL_KINDS, pickVariant, variantColors, WORLD_SIZE, blockId, createRng as rngFor } from '../src/index';
+
+test('bigger world with animal biomes; biomes left out when their animals are disabled', () => {
+  assert.ok(WORLD_SIZE.x >= 176);
+  const full = createWorldGrid();
+  const all = generateIsland(full, 1337);
+  assert.deepEqual(all.biomes.map((b) => b.biome).sort(), ['bamboo', 'farm', 'flowers', 'forest', 'highlands', 'pond', 'village']);
+  assert.ok(full.count(blockId('water')) > 50, 'pond has water');
+  assert.ok(full.count(blockId('bamboo')) > 20 && full.count(blockId('beehive')) === 3 && full.count(blockId('spruce_log')) > 20);
+  const few = createWorldGrid();
+  const some = generateIsland(few, 1337, { biomes: biomesFor(parseAnimalSetting(['cow', 'dog'])) });
+  assert.deepEqual(some.biomes.map((b) => b.biome).sort(), ['farm', 'village']);
+  assert.equal(few.count(blockId('water')), 0, 'no ducks → no pond');
+  assert.equal(few.count(blockId('bamboo')), 0, 'no pandas → no bamboo grove');
+  const sx = Math.floor(some.spawn.x), sz = Math.floor(some.spawn.z);
+  assert.ok(getBlock(few.get(sx, some.spawn.y - 1, sz))?.solid, 'spawn still on solid ground');
+});
+
+test('animal settings, variants and colours', () => {
+  assert.equal(parseAnimalSetting(undefined).length, ANIMAL_KINDS.length);
+  assert.deepEqual(parseAnimalSetting(false), []);
+  assert.deepEqual(parseAnimalSetting(['duck', 'unicorn', 'cat']), ['duck', 'cat']);
+  assert.deepEqual(biomesFor(['panda']), ['village', 'bamboo']);
+  for (const k of ANIMAL_KINDS) {
+    const v = pickVariant(k, rngFor(3));
+    assert.match(variantColors(k, v).main, /^#[0-9a-f]{6}$/);
+  }
+});

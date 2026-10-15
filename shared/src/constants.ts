@@ -1,5 +1,6 @@
 /** World and gameplay constants shared by client and server. */
-export const WORLD_SIZE = { x: 112, y: 32, z: 112 } as const;
+/** Default world: a bigger island (radius ≈ 46) with a village and animal biomes around it. */
+export const WORLD_SIZE = { x: 176, y: 40, z: 176 } as const;
 export const CHUNK_SIZE = 16;
 export const SURFACE_Y = 5;
 export const WATER_LEVEL = 3.45;
@@ -15,7 +16,7 @@ export const ROOM_NAME = 'blocksy';
  * Bump on any breaking change to messages or shared rules. Client and server each carry a copy of
  * `shared/`; the server refuses clients whose version differs, with a clear error.
  */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 /** Players joining with the same multiplayerId share a room; this is used when none is given. */
 export const DEFAULT_MULTIPLAYER_ID = 'public';
 export const GAME_NAME = 'Blocksy';

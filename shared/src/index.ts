@@ -13,4 +13,5 @@ export * from './economy';
 export * from './textures';
 export * from './mesher';
 export * from './minigames';
+export * from './animals';
 export type * from './protocol';

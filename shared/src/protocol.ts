@@ -53,6 +53,8 @@ export interface ClientMessages {
   rename: { name: string };
   /** Play with a Game Center character. */
   mgNpc: { npcId: string };
+  /** Pet / interact with an animal. */
+  pet: { animalId: string };
 }
 
 /** Server → client messages. */

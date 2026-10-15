@@ -21,7 +21,9 @@ import {
 
 // ---------- shared/constants.ts ----------
 /** World and gameplay constants shared by client and server. */
-const WORLD_SIZE = { x: 112, y: 32, z: 112 } as const;
+/** Default world: a bigger island (radius ≈ 46) with a village and animal biomes around it. */
+const WORLD_SIZE = { x: 176, y: 40, z: 176 } as const;
+const CHUNK_SIZE = 16;
 const SURFACE_Y = 5;
 const WATER_LEVEL = 3.45;
 const MAX_PLAYERS = 8;
@@ -29,15 +31,18 @@ const REACH = 5.5;
 const PLAYER_HEIGHT = 1.8;
 const PLAYER_RADIUS = 0.3;
 const EYE_HEIGHT = 1.62;
+const RESPAWN_BELOW_Y = 0.5;
 /** Colyseus room name on the game server. */
 const ROOM_NAME = 'blocksy';
 /**
  * Bump on any breaking change to messages or shared rules. Client and server each carry a copy of
  * `shared/`; the server refuses clients whose version differs, with a clear error.
  */
-const PROTOCOL_VERSION = 4;
+const PROTOCOL_VERSION = 5;
 /** Players joining with the same multiplayerId share a room; this is used when none is given. */
 const DEFAULT_MULTIPLAYER_ID = 'public';
+const GAME_NAME = 'Blocksy';
+const ISLAND_NAME = 'Sunny Isle';
 const HOTBAR_SLOTS = 9;
 
 // ---------- shared/rng.ts ----------
@@ -53,6 +58,15 @@ function createRng(seed: number): () => number {
   };
 }
 
+/** FNV-1a string hash (stable across engines). */
+function hashString(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
 
 /** Integer in [0, n). */
 const randInt = (rng: () => number, n: number): number => Math.floor(rng() * n);
@@ -126,6 +140,13 @@ const BLOCKS: readonly BlockDef[] = [
   def(27, 'tall_grass', 'Grass Tuft', ['tall_grass'], plant()),
   // Indestructible base layer of the island. Never sold, never removable.
   def(28, 'island_core', 'Island Core', ['island_core'], { purchasable: false, removable: false }),
+  // Biome blocks
+  def(29, 'water', 'Water', ['water'], { layer: 2, solid: false, removable: false, targetable: false, purchasable: false, replaceable: true }),
+  def(30, 'hay', 'Hay Bale', ['hay_top', 'hay_side', 'hay_top']),
+  def(31, 'beehive', 'Beehive', ['hive_top', 'hive_side', 'hive_top'], { category: 'decor' }),
+  def(32, 'spruce_log', 'Spruce Log', ['spruce_log_top', 'spruce_log_side', 'spruce_log_top']),
+  def(33, 'spruce_leaves', 'Spruce Leaves', ['spruce_leaves'], { layer: 1 }),
+  def(34, 'bamboo', 'Bamboo', ['bamboo'], plant({ replaceable: false })),
 ];
 
 const byId: (BlockDef | undefined)[] = [];
@@ -145,6 +166,8 @@ function blockId(key: string): number {
   return b.id;
 }
 
+/** Full opaque cubes hide neighbouring faces. */
+const occludes = (b: BlockDef | undefined): boolean => !!b && b.shape === 'cube' && b.layer === 0;
 
 // ---------- shared/grid.ts ----------
 type ChangeListener = (x: number, y: number, z: number, oldId: number, newId: number) => void;
@@ -228,6 +251,17 @@ function rleEncode(data: ArrayLike<number>): number[] {
   return out;
 }
 
+/** Decodes {@link rleEncode} output into a target array; throws if the length doesn't match. */
+function rleDecodeInto(rle: readonly number[], target: Uint16Array | Uint8Array): void {
+  let o = 0;
+  for (let i = 0; i + 1 < rle.length; i += 2) {
+    const v = rle[i], n = rle[i + 1];
+    if (o + n > target.length) throw new Error('RLE overflow');
+    target.fill(v, o, o + n);
+    o += n;
+  }
+  if (o !== target.length) throw new Error(`RLE length mismatch: ${o} != ${target.length}`);
+}
 
 // ---------- shared/placement.ts ----------
 interface Aabb { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }
@@ -249,6 +283,12 @@ function intersects(a: Aabb, b: Aabb, eps = 0.001): boolean {
 type PlacementResult = 'ok' | 'out_of_bounds' | 'occupied' | 'blocked_by_actor' | 'not_placeable' | 'not_owned' | 'out_of_range';
 type RemovalResult = 'ok' | 'out_of_bounds' | 'empty' | 'protected' | 'not_removable' | 'out_of_range';
 
+/** Replaceable blocks (plants) are replaced in place; otherwise the block goes beside the hit face. */
+function resolvePlacementCell(grid: BlockGrid, hx: number, hy: number, hz: number, nx: number, ny: number, nz: number): [number, number, number] {
+  const hit = getBlock(grid.get(hx, hy, hz));
+  if (hit?.replaceable && !grid.isProtected(hx, hy, hz)) return [hx, hy, hz];
+  return [hx + nx, hy + ny, hz + nz];
+}
 
 function evaluatePlacement(grid: BlockGrid, x: number, y: number, z: number, id: number, blockers: readonly Aabb[]): PlacementResult {
   const def = getBlock(id);
@@ -304,6 +344,8 @@ interface IslandLayout {
   lanterns: [number, number, number][];
   /** Fenced area with NPCs that play the popup mini-games. */
   gameCenter: { x: number; y: number; z: number; npcs: GameCenterNpc[] };
+  /** Animal homes: centre and radius of each biome that was built. */
+  biomes: { biome: Biome; x: number; y: number; z: number; r: number }[];
 }
 
 const createWorldGrid = (): BlockGrid => new BlockGrid(WORLD_SIZE.x, WORLD_SIZE.y, WORLD_SIZE.z);
@@ -314,7 +356,7 @@ const createWorldGrid = (): BlockGrid => new BlockGrid(WORLD_SIZE.x, WORLD_SIZE.
  * (Blocks, Decor) with striped awnings, fenced "Build Here" plots, trees, lantern posts, a dock and
  * floating islets. Yaw is in radians; yaw 0 faces +Z.
  */
-function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
+function generateIsland(grid: BlockGrid, seed: number, opts: { biomes?: readonly Biome[] } = {}): IslandLayout {
   const rng = createRng(seed);
   const CX = Math.floor(grid.sx / 2), CZ = Math.floor(grid.sz / 2);
   const S = SURFACE_Y;
@@ -326,13 +368,15 @@ function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
     flowerW: blockId('white_flower'), flowerY: blockId('yellow_flower'), sand: blockId('sand'),
     teal: blockId('teal_wool'), red: blockId('red_wool'), white: blockId('white_wool'), glass: blockId('glass'),
     craft: blockId('crafting_table'), chest: blockId('chest'),
+    water: blockId('water'), hay: blockId('hay'), hive: blockId('beehive'), spruceLog: blockId('spruce_log'),
+    spruceLeaves: blockId('spruce_leaves'), bamboo: blockId('bamboo'),
   };
   const island = new Uint8Array(grid.sx * grid.sz);
   const reserved = new Uint8Array(grid.sx * grid.sz);
   const layout: IslandLayout = {
     spawn: { x: CX + 0.5, y: S + 1, z: CZ - 15 + 0.5, yaw: 0 },
     center: { x: CX + 0.5, y: S + 1, z: CZ + 0.5 },
-    waterLevel: WATER_LEVEL, stalls: [], signs: [], lanterns: [], gameCenter: { x: 0, y: 0, z: 0, npcs: [] },
+    waterLevel: WATER_LEVEL, stalls: [], signs: [], lanterns: [], gameCenter: { x: 0, y: 0, z: 0, npcs: [] }, biomes: [],
   };
 
   const col = (x: number, z: number) => z * grid.sx + x;
@@ -356,7 +400,7 @@ function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
   for (let x = 0; x < grid.sx; x++) for (let z = 0; z < grid.sz; z++) {
     const dx = x - CX, dz = z - CZ;
     const dist = Math.hypot(dx, dz), a = Math.atan2(dz, dx);
-    const r = 25.5 + 2.2 * Math.sin(3 * a + p1) + 1.5 * Math.sin(5 * a + p2) + 0.9 * Math.sin(7 * a + p3);
+    const r = 47 + 1.6 * Math.sin(3 * a + p1) + 1.0 * Math.sin(5 * a + p2) + 0.6 * Math.sin(7 * a + p3);
     if (dist > r) continue;
     island[col(x, z)] = 1;
     grid.setSilent(x, 0, z, B.core);
@@ -493,6 +537,108 @@ function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
     };
   }
 
+  // --- animal biomes around the village (only the ones requested) ---
+  const want = new Set<Biome>(opts.biomes ?? ['village', 'farm', 'bamboo', 'forest', 'pond', 'flowers', 'highlands']);
+  const home = (biome: Biome, dx: number, dz: number, r: number) =>
+    layout.biomes.push({ biome, x: CX + dx + 0.5, y: S + 1, z: CZ + dz + 0.5, r });
+  const clearAbove = (dx: number, dz: number, h = 6) => { for (let y = S + 1; y <= S + h; y++) set(dx, y, dz, AIR); };
+  home('village', 0, -4, 16);
+
+  if (want.has('farm')) {               // fenced pasture with hay bales and a chicken coop
+    const fx = -29, fz = 15, R = 8;
+    for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
+      const x = fx + dx, z = fz + dz;
+      if (!inIsland(x, z)) continue;
+      reserve(x, z); clearAbove(x, z);
+      const edge = Math.abs(dx) === R || Math.abs(dz) === R, gate = dx === R && Math.abs(dz) <= 1;
+      if (edge && !gate) set(x, S + 1, z, B.fence);
+    }
+    for (const [dx, dz, h] of [[3, -4, 2], [4, -4, 1], [-2, 3, 1], [5, 4, 2]]) for (let k = 1; k <= h; k++) set(fx + dx, S + k, fz + dz, B.hay);
+    const cx0 = fx - R + 1, cz0 = fz + R - 4;   // coop
+    for (let dx = 0; dx < 3; dx++) for (let dz = 0; dz < 3; dz++) {
+      set(cx0 + dx, S, cz0 + dz, B.planks);
+      set(cx0 + dx, S + 3, cz0 + dz, B.dark);
+      if (dz === 2 || dx === 0) for (let y = S + 1; y <= S + 2; y++) set(cx0 + dx, y, cz0 + dz, B.planks);
+    }
+    set(cx0 + 2, S + 1, cz0, B.hay);
+    home('farm', fx, fz, R - 1);
+  }
+
+  if (want.has('bamboo')) {             // dense bamboo grove
+    const bx = 29, bz = 23, R = 8;
+    for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
+      const x = bx + dx, z = bz + dz;
+      if (dx * dx + dz * dz > R * R || !inIsland(x, z)) continue;
+      reserve(x, z); clearAbove(x, z, 8);
+      if (rng() < 0.3 && get(x, S, z) === B.grass) { const h = 3 + randInt(rng, 4); for (let k = 1; k <= h; k++) set(x, S + k, z, B.bamboo); }
+    }
+    home('bamboo', bx, bz, R);
+  }
+
+  if (want.has('forest')) {             // spruce forest
+    const sx0 = 31, sz0 = -17, R = 10;
+    for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) if (dx * dx + dz * dz <= R * R) reserve(sx0 + dx, sz0 + dz);
+    const placed: [number, number][] = [];
+    for (let i = 0; i < 120 && placed.length < 14; i++) {
+      const dx = randInt(rng, 2 * R + 1) - R, dz = randInt(rng, 2 * R + 1) - R;
+      const x = sx0 + dx, z = sz0 + dz;
+      if (dx * dx + dz * dz > (R - 1) ** 2 || !inIsland(x, z) || get(x, S, z) !== B.grass) continue;
+      if (placed.some(([px, pz]) => (px - x) ** 2 + (pz - z) ** 2 < 12)) continue;
+      placed.push([x, z]);
+      const h = 5 + randInt(rng, 3);
+      set(x, S, z, B.dirt);
+      for (let k = 1; k <= h; k++) set(x, S + k, z, B.spruceLog);
+      const radii = [2, 2, 1, 1, 0];
+      radii.forEach((rad, i2) => {
+        const y = S + h - 2 + i2;
+        for (let ox = -rad; ox <= rad; ox++) for (let oz = -rad; oz <= rad; oz++) {
+          if (Math.abs(ox) + Math.abs(oz) > rad + 1) continue;
+          if (grid.get(CX + x + ox, y, CZ + z + oz) === AIR) set(x + ox, y, z + oz, B.spruceLeaves);
+        }
+      });
+      set(x, S + h + 1, z, B.spruceLeaves);
+    }
+    home('forest', sx0, sz0, R);
+  }
+
+  if (want.has('pond')) {               // pond with a sandy shore
+    const px = -27, pz = -23, rx = 7, rz = 5;
+    for (let dx = -rx - 2; dx <= rx + 2; dx++) for (let dz = -rz - 2; dz <= rz + 2; dz++) {
+      const x = px + dx, z = pz + dz, d = (dx * dx) / (rx * rx) + (dz * dz) / (rz * rz);
+      if (d > 1.5 || !inIsland(x, z)) continue;
+      reserve(x, z); clearAbove(x, z);
+      if (d <= 1) { set(x, S, z, B.water); set(x, S - 1, z, B.water); set(x, S - 2, z, B.sand); }
+      else set(x, S, z, B.sand);
+    }
+    home('pond', px, pz, Math.max(rx, rz) + 1);
+  }
+
+  if (want.has('flowers')) {            // flower meadow with beehives on posts
+    const mx = 0, mz = -37, R = 8;
+    for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
+      const x = mx + dx, z = mz + dz;
+      if (dx * dx + dz * dz > R * R || !inIsland(x, z)) continue;
+      reserve(x, z); clearAbove(x, z);
+      if (get(x, S, z) === B.grass && rng() < 0.5) set(x, S + 1, z, rng() < 0.5 ? B.flowerW : rng() < 0.7 ? B.flowerY : B.tall);
+    }
+    for (const [dx, dz] of [[-3, 2], [3, 3], [0, -4]]) { set(mx + dx, S + 1, mz + dz, B.fence); set(mx + dx, S + 2, mz + dz, B.hive); }
+    home('flowers', mx, mz, R);
+  }
+
+  if (want.has('highlands')) {          // stepped grassy hills with boulders
+    const hx = 0, hz = 37, R = 9;
+    for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
+      const x = hx + dx, z = hz + dz, d = Math.hypot(dx, dz) / R;
+      if (d > 1 || !inIsland(x, z)) continue;
+      reserve(x, z); clearAbove(x, z, 8);
+      const levels = d < 0.3 ? 3 : d < 0.6 ? 2 : d < 0.85 ? 1 : 0;
+      for (let k = 0; k < levels; k++) set(x, S + k, z, k === 0 ? B.dirt : B.stone);
+      set(x, S + levels, z, B.grass);
+      if (levels > 0 && rng() < 0.04) set(x, S + levels + 1, z, B.cobble);
+    }
+    home('highlands', hx, hz, R);
+  }
+
   // --- dock ---
   const dz0 = -14;
   let shore = 0;
@@ -547,8 +693,8 @@ function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
     }
   };
   const trees: [number, number][] = [[0, 14]];
-  for (let attempt = 0; trees.length < 14 && attempt < 400; attempt++) {
-    const a = rng() * Math.PI * 2, r = 6 + rng() * 16;
+  for (let attempt = 0; trees.length < 34 && attempt < 900; attempt++) {
+    const a = rng() * Math.PI * 2, r = 6 + rng() * 36;
     const tx = Math.round(Math.cos(a) * r), tz = Math.round(Math.sin(a) * r);
     if (!inIsland(tx, tz) || isReserved(tx, tz, 2) || get(tx, S, tz) !== B.grass) continue;
     if (trees.some(([px, pz]) => (px - tx) ** 2 + (pz - tz) ** 2 < 36)) continue;
@@ -557,7 +703,7 @@ function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
 
   // --- floating islets ---
   for (const a of [0.7, 2.1, 3.7, 5.1]) {
-    const ix = CX + Math.round(Math.cos(a) * 43), iz = CZ + Math.round(Math.sin(a) * 43);
+    const ix = CX + Math.round(Math.cos(a) * 70), iz = CZ + Math.round(Math.sin(a) * 70);
     const top = 8 + randInt(rng, 5), radius = 4 + rng() * 2;
     for (let layer = 0; layer <= 6; layer++) {
       const r = radius - layer * 0.85;
@@ -623,6 +769,12 @@ const DEFAULT_APPEARANCE: Readonly<Appearance> = {
   hat: 'none', hatColor: '#c0392b', glasses: 'none', glassesColor: '#222222', watch: 'none', watchColor: '#333333',
 };
 
+const PALETTES = {
+  skin: ['#f6d3b3', '#edb98a', '#e0ac7e', '#c68642', '#9e6b43', '#7a4a2a', '#5a3825', '#3d2616'],
+  hair: ['#1e1e1e', '#3b2416', '#5a3a22', '#8a5a30', '#c89b5a', '#e8d29a', '#b5452f', '#8c8c8c', '#3f6fd8', '#d85aa0'],
+  clothing: ['#2bb3a8', '#e8584b', '#f2c230', '#9b6bd6', '#3e78d6', '#2e3a7a', '#3a9e4f', '#f28c38', '#f2f2f2', '#2a2a2e', '#8a6a4a', '#e87db0'],
+  accessory: ['#222222', '#c9a227', '#c0c0c8', '#c0392b', '#2e86de', '#f2f2f2', '#8e44ad', '#16a085'],
+} as const;
 
 const HEX = /^#[0-9a-f]{6}$/i;
 const pick = <T extends readonly string[]>(list: T, v: unknown, fallback: T[number]): T[number] =>
@@ -645,7 +797,24 @@ function sanitizeAppearance(input: unknown): Appearance {
   };
 }
 
+/** Cycles through a style list. */
+function cycle<T extends string>(list: readonly T[], value: T, delta: number): T {
+  const i = Math.max(0, list.indexOf(value));
+  return list[(((i + delta) % list.length) + list.length) % list.length];
+}
 
+/** A random look; accessories are rarer than clothing so crowds don't look noisy. */
+function randomAppearance(rng: () => number): Appearance {
+  const p = <T>(l: readonly T[]) => l[randInt(rng, l.length)];
+  return {
+    skin: p(PALETTES.skin), hair: p(HAIR_STYLES), hairColor: p(PALETTES.hair),
+    shirt: p(SHIRT_STYLES), shirtColor: p(PALETTES.clothing), pants: p(PANTS_STYLES), pantsColor: p(PALETTES.clothing),
+    shoes: p(SHOE_STYLES), shoeColor: p(PALETTES.clothing),
+    hat: rng() < 0.3 ? p(HAT_STYLES) : 'none', hatColor: p(PALETTES.clothing),
+    glasses: rng() < 0.25 ? p(GLASSES_STYLES) : 'none', glassesColor: p(PALETTES.accessory),
+    watch: rng() < 0.3 ? p(WATCH_STYLES) : 'none', watchColor: p(PALETTES.accessory),
+  };
+}
 
 // ---------- shared/social.ts ----------
 /** Emoji shown above a character's head. */
@@ -661,7 +830,9 @@ const EMOTES = [
 ] as const;
 type EmoteId = typeof EMOTES[number]['id'];
 
+const PRESET_MESSAGES = ['Hi!', 'Goodbye!', "What's up?", "I'm happy", "I'm sad", 'Nice build!', 'Follow me!'] as const;
 const MAX_MESSAGE_LENGTH = 60;
+const MAX_NAME_LENGTH = 16;
 
 const isEmojiId = (v: unknown): v is EmojiId => EMOJIS.some((e) => e.id === v);
 const isEmoteId = (v: unknown): v is EmoteId => EMOTES.some((e) => e.id === v);
@@ -679,6 +850,11 @@ function sanitizeMultiplayerId(raw: unknown, fallback = 'public'): string {
   return typeof raw === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(raw) ? raw : fallback;
 }
 
+/** Player display names: sanitised, never empty. */
+function sanitizeName(raw: unknown): string {
+  const n = sanitizeMessage(raw, MAX_NAME_LENGTH);
+  return n.length > 0 ? n : 'Player';
+}
 
 // ---------- shared/economy.ts ----------
 /**
@@ -723,6 +899,7 @@ function purchase(profile: ProfileData, id: number): PurchaseResult {
   return 'purchased';
 }
 
+const owns = (profile: ProfileData, id: number): boolean => profile.owned.includes(id);
 
 /** Puts a block in a slot; if it's already in another slot the two swap (a block never appears twice). */
 function assignSlot(hotbar: number[], slot: number, id: number): void {
@@ -747,84 +924,136 @@ const TOOLS = ['none', 'block', 'destroy'] as const;
 type ToolKind = typeof TOOLS[number];
 const isToolKind = (v: unknown): v is ToolKind => (TOOLS as readonly unknown[]).includes(v);
 
+const listings = (category: ShopCategory): BlockDef[] => BLOCKS.filter((b) => b.purchasable && b.category === category);
 
-// ---------- shared/protocol.ts ----------
+// ---------- shared/animals.ts ----------
 /**
- * Options for `client.joinOrCreate(ROOM_NAME, options)`.
- * `jwt` comes from the platform backend (POST /client/realtime/token { multiplayerId }) and is verified
- * by the game server. Players with the same `multiplayerId` share a room.
+ * Island animals: kinds, home biomes, realistic colour variants, sounds and the server setting parser.
  */
-interface JoinOptions {
-  jwt?: string;
-  multiplayerId: string;
-  username: string;
-  /** Anonymous id used only when the server runs without JWT verification (local development). */
-  profileId?: string;
-  protocolVersion: number;
+
+const ANIMAL_KINDS = [
+  'cow', 'sheep', 'pig', 'chicken', 'rooster', 'chick', 'panda', 'fox', 'duck', 'bee', 'dog', 'cat', 'llama', 'rabbit',
+] as const;
+type AnimalKind = typeof ANIMAL_KINDS[number];
+const isAnimalKind = (v: unknown): v is AnimalKind => (ANIMAL_KINDS as readonly unknown[]).includes(v);
+
+/** Biomes of the island. The village always exists; the others are only built if one of their animals is enabled. */
+const BIOMES = ['village', 'farm', 'bamboo', 'forest', 'pond', 'flowers', 'highlands'] as const;
+type Biome = typeof BIOMES[number];
+
+const ANIMAL_BIOME: Record<AnimalKind, Biome> = {
+  cow: 'farm', sheep: 'farm', pig: 'farm', chicken: 'farm', rooster: 'farm', chick: 'farm',
+  panda: 'bamboo', fox: 'forest', rabbit: 'forest', duck: 'pond', bee: 'flowers', llama: 'highlands',
+  dog: 'village', cat: 'village',
+};
+
+/** Biomes needed for a set of animals (the village is always included). */
+function biomesFor(kinds: readonly AnimalKind[]): Biome[] {
+  const set = new Set<Biome>(['village']);
+  for (const k of kinds) set.add(ANIMAL_BIOME[k]);
+  return BIOMES.filter((b) => set.has(b));
 }
 
-/** Per-player transform sent in every `state` message. */
-interface PlayerSnapshot {
-  id: string;
-  x: number; y: number; z: number; yaw: number;
-  speed: number; grounded: boolean;
-  held: number; tool: ToolKind;
-  /** Incremented on every place/remove so others can play the arm swing. */
-  action: number;
+/**
+ * Reads the "animals" custom setting:
+ *  true / missing → all animals;  false → none;  ["cow", "duck", …] → only those (unknown names ignored).
+ */
+function parseAnimalSetting(v: unknown): AnimalKind[] {
+  if (v === false) return [];
+  if (Array.isArray(v)) return ANIMAL_KINDS.filter((k) => v.includes(k));
+  return [...ANIMAL_KINDS];
 }
 
-/** Rarely-changing player data, sent on join and when it changes. */
-interface PlayerMeta { id: string; name: string; appearance: Appearance }
+const ANIMAL_SOUND: Record<AnimalKind, string> = {
+  cow: 'Moo!', sheep: 'Baa!', pig: 'Oink!', chicken: 'Cluck!', rooster: 'Cock-a-doodle-doo!', chick: 'Peep!',
+  panda: '*munch*', fox: 'Yip!', duck: 'Quack!', bee: 'Bzzz', dog: 'Woof!', cat: 'Meow!', llama: 'Hmmm', rabbit: '*twitch*',
+};
+const ANIMAL_ICON: Record<AnimalKind, string> = {
+  cow: '🐄', sheep: '🐑', pig: '🐖', chicken: '🐔', rooster: '🐓', chick: '🐥', panda: '🐼', fox: '🦊',
+  duck: '🦆', bee: '🐝', dog: '🐕', cat: '🐈', llama: '🦙', rabbit: '🐇',
+};
+/** How many of each kind spawn (multiplied by the animalsPerKind setting / 2). */
+const ANIMAL_BASE_COUNT: Partial<Record<AnimalKind, number>> = { chick: 3, bee: 4, rooster: 1 };
 
-/** Client → server messages. */
-interface ClientMessages {
-  move: { x: number; y: number; z: number; yaw: number; speed: number; grounded: boolean };
-  place: { x: number; y: number; z: number; id: number };
-  remove: { x: number; y: number; z: number };
-  buy: { id: number };
-  hotbar: { slots: number[]; selected: number; tool: ToolKind };
-  appearance: Appearance;
-  chat: { text: string };
-  emoji: { id: EmojiId };
-  emote: { id: EmoteId };
-  mgInvite: { kind: MiniGameKind };
-  mgCancel: Record<string, never>;
-  mgAccept: { hostId: string };
-  mgStart: Record<string, never>;
-  mgMove: { move: MiniGameMove };
-  mgLeave: Record<string, never>;
-  mgSpectate: { gameId: string };
-  rename: { name: string };
-  mgNpc: { npcId: string };
-}
+/** Colour roles used by the models: main body, accent (spots/patches), and detail. */
+interface AnimalColors { main: string; accent: string; detail: string }
+/** Realistic colour variants per kind (weight, colours). */
+const ANIMAL_VARIANTS: Record<AnimalKind, { name: string; weight: number; colors: AnimalColors }[]> = {
+  cow: [
+    { name: 'holstein', weight: 3, colors: { main: '#f4f1ea', accent: '#2b2b2b', detail: '#f2b5b5' } },
+    { name: 'brown', weight: 2, colors: { main: '#7a4e2d', accent: '#f4f1ea', detail: '#e8b0a0' } },
+    { name: 'black', weight: 1, colors: { main: '#2e2c2b', accent: '#2e2c2b', detail: '#d9a3a3' } },
+  ],
+  sheep: [
+    { name: 'white', weight: 6, colors: { main: '#f1f0e9', accent: '#3d3a38', detail: '#f5f5f5' } },
+    { name: 'grey', weight: 2, colors: { main: '#a3a3a0', accent: '#3d3a38', detail: '#f5f5f5' } },
+    { name: 'brown', weight: 1, colors: { main: '#7d5a3c', accent: '#3d3a38', detail: '#f5f5f5' } },
+    { name: 'black', weight: 1, colors: { main: '#353333', accent: '#262424', detail: '#f5f5f5' } },
+  ],
+  pig: [
+    { name: 'pink', weight: 4, colors: { main: '#f2a7a7', accent: '#f2a7a7', detail: '#e48787' } },
+    { name: 'spotted', weight: 2, colors: { main: '#f2b4a8', accent: '#3a2a26', detail: '#e48787' } },
+    { name: 'black', weight: 1, colors: { main: '#3a3434', accent: '#f0e6e0', detail: '#6b5a5a' } },
+  ],
+  chicken: [
+    { name: 'white', weight: 2, colors: { main: '#f6f4ee', accent: '#d9352b', detail: '#f2b632' } },
+    { name: 'brown', weight: 2, colors: { main: '#a0632e', accent: '#d9352b', detail: '#f2b632' } },
+  ],
+  rooster: [
+    { name: 'red', weight: 2, colors: { main: '#b5452f', accent: '#1f3b2a', detail: '#f2b632' } },
+    { name: 'white', weight: 1, colors: { main: '#f6f4ee', accent: '#2b2b2b', detail: '#f2b632' } },
+  ],
+  chick: [{ name: 'yellow', weight: 1, colors: { main: '#f7d64a', accent: '#f29b32', detail: '#2b2b2b' } }],
+  panda: [{ name: 'giant', weight: 1, colors: { main: '#f2f2ee', accent: '#202020', detail: '#202020' } }],
+  fox: [
+    { name: 'red', weight: 6, colors: { main: '#d9682b', accent: '#f6f1e8', detail: '#2b2b2b' } },
+    { name: 'arctic', weight: 1, colors: { main: '#eef2f4', accent: '#ffffff', detail: '#3a3a3a' } },
+  ],
+  duck: [
+    { name: 'mallard', weight: 3, colors: { main: '#8a7a63', accent: '#2f7d4f', detail: '#f2a332' } },
+    { name: 'hen', weight: 2, colors: { main: '#8a6a48', accent: '#7a5a3a', detail: '#e0902e' } },
+    { name: 'white', weight: 2, colors: { main: '#f4f4f0', accent: '#f4f4f0', detail: '#f2a332' } },
+  ],
+  bee: [{ name: 'honeybee', weight: 1, colors: { main: '#f2c02e', accent: '#2b2b2b', detail: '#dff3ff' } }],
+  dog: [
+    { name: 'golden', weight: 3, colors: { main: '#d9a441', accent: '#e8c27a', detail: '#2b2b2b' } },
+    { name: 'brown', weight: 2, colors: { main: '#7a4e2d', accent: '#a0704a', detail: '#2b2b2b' } },
+    { name: 'black', weight: 2, colors: { main: '#2b2b2b', accent: '#4a4040', detail: '#1a1a1a' } },
+    { name: 'white', weight: 1, colors: { main: '#efefea', accent: '#d6cfc4', detail: '#2b2b2b' } },
+  ],
+  cat: [
+    { name: 'orange', weight: 3, colors: { main: '#e0893c', accent: '#c06a26', detail: '#3fa34d' } },
+    { name: 'black', weight: 2, colors: { main: '#2a2a2a', accent: '#1d1d1d', detail: '#e8c547' } },
+    { name: 'grey', weight: 2, colors: { main: '#8f9296', accent: '#6f7276', detail: '#3fa34d' } },
+    { name: 'white', weight: 1, colors: { main: '#f2f2ee', accent: '#e2dcd2', detail: '#5aa3e0' } },
+    { name: 'calico', weight: 1, colors: { main: '#f2efe8', accent: '#d9822b', detail: '#3fa34d' } },
+  ],
+  llama: [
+    { name: 'white', weight: 2, colors: { main: '#f1ece2', accent: '#d8cbb3', detail: '#2b2b2b' } },
+    { name: 'beige', weight: 2, colors: { main: '#d8c3a0', accent: '#b8a07a', detail: '#2b2b2b' } },
+    { name: 'brown', weight: 2, colors: { main: '#8a6142', accent: '#6e4a30', detail: '#2b2b2b' } },
+  ],
+  rabbit: [
+    { name: 'white', weight: 2, colors: { main: '#f4f2ec', accent: '#f2b5c0', detail: '#d94a5a' } },
+    { name: 'brown', weight: 3, colors: { main: '#8a6142', accent: '#d9c2a8', detail: '#2b2b2b' } },
+    { name: 'grey', weight: 2, colors: { main: '#8f8f8f', accent: '#d6d6d6', detail: '#2b2b2b' } },
+  ],
+};
 
-/** Server → client messages. */
-interface ServerMessages {
-  /** Join snapshot: RLE-encoded grid + protection mask, layout, your profile and everyone's meta. */
-  init: {
-    protocolVersion: number;
-    you: string;
-    size: [number, number, number];
-    cells: number[];
-    protectedCells: number[];
-    layout: IslandLayout;
-    profile: ProfileData;
-    spawn: { x: number; y: number; z: number; yaw: number };
-    players: PlayerMeta[];
-  };
-  /** Broadcast at ~15 Hz: transforms of every player in the room (including you). */
-  state: { t: number; players: PlayerSnapshot[] };
-  playerMeta: PlayerMeta;
-  playerLeft: { id: string };
-  blockSet: { x: number; y: number; z: number; id: number };
-  /** Sent only to the editing client when an edit was refused (includes the cell's real id). */
-  editRejected: { x: number; y: number; z: number; id: number; reason: PlacementResult | RemovalResult };
-  profile: { profile: ProfileData; result?: PurchaseResult };
-  chat: { sessionId: string; text: string };
-  emoji: { sessionId: string; id: EmojiId };
-  emote: { sessionId: string; id: EmoteId };
-  teleport: { x: number; y: number; z: number };
+function pickVariant(kind: AnimalKind, rng: () => number): string {
+  const list = ANIMAL_VARIANTS[kind];
+  let r = rng() * list.reduce((n, v) => n + v.weight, 0);
+  for (const v of list) { r -= v.weight; if (r <= 0) return v.name; }
+  return list[0].name;
 }
+const variantColors = (kind: AnimalKind, variant: string): AnimalColors =>
+  (ANIMAL_VARIANTS[kind].find((v) => v.name === variant) ?? ANIMAL_VARIANTS[kind][0]).colors;
+
+/** Animals that fly (bees) or swim (ducks) move differently. */
+const FLYING: readonly AnimalKind[] = ['bee'];
+const SWIMMING: readonly AnimalKind[] = ['duck'];
+/** Distance (m) within which a player can pet an animal. */
+const PET_RADIUS = 2.6;
 
 // ---------- shared/minigames.ts ----------
 /**
@@ -1322,6 +1551,87 @@ function ludoBotAction(s: LudoState, rng: () => number = Math.random): LudoActio
 /** A Game Center character that plays one mini-game. */
 interface GameCenterNpc { id: string; name: string; kind: MiniGameKind; x: number; y: number; z: number; yaw: number }
 
+// ---------- shared/protocol.ts ----------
+/**
+ * Options for `client.joinOrCreate(ROOM_NAME, options)`.
+ * `jwt` comes from the platform backend (POST /client/realtime/token { multiplayerId }) and is verified
+ * by the game server. Players with the same `multiplayerId` share a room.
+ */
+interface JoinOptions {
+  jwt?: string;
+  multiplayerId: string;
+  username: string;
+  /** Anonymous id used only when the server runs without JWT verification (local development). */
+  profileId?: string;
+  protocolVersion: number;
+}
+
+/** Per-player transform sent in every `state` message. */
+interface PlayerSnapshot {
+  id: string;
+  x: number; y: number; z: number; yaw: number;
+  speed: number; grounded: boolean;
+  held: number; tool: ToolKind;
+  /** Incremented on every place/remove so others can play the arm swing. */
+  action: number;
+}
+
+/** Rarely-changing player data, sent on join and when it changes. */
+interface PlayerMeta { id: string; name: string; appearance: Appearance }
+
+/** Client → server messages. */
+interface ClientMessages {
+  move: { x: number; y: number; z: number; yaw: number; speed: number; grounded: boolean };
+  place: { x: number; y: number; z: number; id: number };
+  remove: { x: number; y: number; z: number };
+  buy: { id: number };
+  hotbar: { slots: number[]; selected: number; tool: ToolKind };
+  appearance: Appearance;
+  chat: { text: string };
+  emoji: { id: EmojiId };
+  emote: { id: EmoteId };
+  mgInvite: { kind: MiniGameKind };
+  mgCancel: Record<string, never>;
+  mgAccept: { hostId: string };
+  mgStart: Record<string, never>;
+  mgMove: { move: MiniGameMove };
+  mgLeave: Record<string, never>;
+  mgSpectate: { gameId: string };
+  rename: { name: string };
+  /** Play with a Game Center character. */
+  mgNpc: { npcId: string };
+  /** Pet / interact with an animal. */
+  pet: { animalId: string };
+}
+
+/** Server → client messages. */
+interface ServerMessages {
+  /** Join snapshot: RLE-encoded grid + protection mask, layout, your profile and everyone's meta. */
+  init: {
+    protocolVersion: number;
+    you: string;
+    size: [number, number, number];
+    cells: number[];
+    protectedCells: number[];
+    layout: IslandLayout;
+    profile: ProfileData;
+    spawn: { x: number; y: number; z: number; yaw: number };
+    players: PlayerMeta[];
+  };
+  /** Broadcast at ~15 Hz: transforms of every player in the room (including you). */
+  state: { t: number; players: PlayerSnapshot[] };
+  playerMeta: PlayerMeta;
+  playerLeft: { id: string };
+  blockSet: { x: number; y: number; z: number; id: number };
+  /** Sent only to the editing client when an edit was refused (includes the cell's real id). */
+  editRejected: { x: number; y: number; z: number; id: number; reason: PlacementResult | RemovalResult };
+  profile: { profile: ProfileData; result?: PurchaseResult };
+  chat: { sessionId: string; text: string };
+  emoji: { sessionId: string; id: EmojiId };
+  emote: { sessionId: string; id: EmoteId };
+  teleport: { x: number; y: number; z: number };
+}
+
 // =====================================================================================================
 // SETTINGS (dashboard → Custom settings; every value is validated, with a default)
 // =====================================================================================================
@@ -1330,7 +1640,9 @@ interface BlocksySettings {
   worldSeed: number;
   inviteAcceptDelaySec: number;
   ambientBots: number;
-  animals: boolean;
+  /** Animals on this server (Custom settings "animals": true | false | ["cow", …]). Biomes follow from it. */
+  animals: AnimalKind[];
+  animalsPerKind: number;
   botJoinAfterSec: number;
   rpsPickSec: number;
   rpsBestOf: number;
@@ -1350,7 +1662,8 @@ function readSettings(roomName: string): BlocksySettings {
     worldSeed: int(raw.worldSeed, 1337, 1, 2_147_483_647),
     inviteAcceptDelaySec: int(raw.inviteAcceptDelaySec, 5, 0, 60),
     ambientBots: int(raw.ambientBots, 4, 0, 8),
-    animals: typeof raw.animals === 'boolean' ? raw.animals : true,
+    animals: parseAnimalSetting(raw.animals),
+    animalsPerKind: int((raw as Record<string, unknown>).animalsPerKind, 2, 1, 6),
     botJoinAfterSec: int(raw.botJoinAfterSec, 5, 1, 120),
     rpsPickSec: int(raw.rpsPickSec, 3, 2, 15),
     rpsBestOf: int(raw.rpsBestOf, 3, 1, 9),
@@ -1414,7 +1727,7 @@ interface Player {
 
 /** Messages per second per player. "move" is sent at 15 Hz by the client. */
 const RATE_LIMITS: Record<string, number> = {
-  rename: 1, mgNpc: 2, mgInvite: 2, mgCancel: 2, mgAccept: 2, mgStart: 2, mgMove: 6, mgLeave: 2, mgSpectate: 2,
+  rename: 1, pet: 3, mgNpc: 2, mgInvite: 2, mgCancel: 2, mgAccept: 2, mgStart: 2, mgMove: 6, mgLeave: 2, mgSpectate: 2,
   move: 20, place: 12, remove: 12, hotbar: 10, buy: 5, appearance: 2, restore: 1, chat: 2, emoji: 2, emote: 1,
 };
 const STATE_INTERVAL_MS = 100;
@@ -1849,7 +2162,7 @@ class MiniGameHub {
     s.seatPos = s.seatPos.filter((x) => x.id !== id);
     this.d.send(id, 'mgEnded', { id: s.id });
     if (s.phase === 'over') {
-      if (s.seatPos.length === 0) this.close(s); // everyone already left the result screen
+      this.closeIfOnlyBots(s); // everyone human already left the result screen
       return;
     }
     const seat = s.seats.indexOf(id);
@@ -1857,12 +2170,18 @@ class MiniGameHub {
       s.ludo.state = ludoLeave(s.ludo.state, seat);
       const active = ludoActive(s.ludo.state);
       if (active.length < 2) return this.finish(s, active.map((i) => s.seats[i]), 'left');
-      if (active.every((i) => isBotId(s.seats[i]))) return this.finish(s, [], 'left');
+      if (active.every((i) => isBotId(s.seats[i]))) { this.finish(s, [], 'left'); this.closeIfOnlyBots(s); return; }
       this.arm(s, this.d.settings().ludoTurnSec * 1000, () => this.autoPlay(s));
       this.push(s);
       return;
     }
     this.finish(s, s.seats.filter((x) => x !== id), 'left');
+    this.closeIfOnlyBots(s);
+  }
+
+  /** Nobody human left at the table (and nobody watching): no result screen needed, free the bots now. */
+  private closeIfOnlyBots(s: MgSession): void {
+    if (this.sessions.has(s.id) && s.seatPos.every((x) => isBotId(x.id)) && s.spectators.size === 0) this.close(s);
   }
 
   /** After a reconnect: resend whatever the player is part of. */
@@ -1918,28 +2237,41 @@ class MiniGameHub {
 // Simulated on the server (in the 100 ms state tick) so every player sees the same thing.
 // =====================================================================================================
 
-type AnimalKind = 'cow' | 'sheep' | 'pig' | 'cat';
 interface Walker { id: string; x: number; y: number; z: number; yaw: number; tx: number; tz: number; moving: boolean; waitUntil: number; speed: number }
 type BotTask =
   | { type: 'wander' }
   | { type: 'join'; hostId: string; until: number }
   | { type: 'watch'; gameId: string; until: number }
-  | { type: 'talk'; with: string; until: number; replyAt: number; line: number; replied: boolean };
-interface AmbientBot extends Walker { name: string; appearance: Appearance; task: BotTask; nextSocial: number; nextTalk: number; nextWatch: number }
-interface Animal extends Walker { kind: AnimalKind }
+  | { type: 'talk'; with: string; until: number; replyAt: number; line: number; replied: boolean }
+  | { type: 'pet'; animalId: string; until: number };
+interface AmbientBot extends Walker { name: string; appearance: Appearance; task: BotTask; nextSocial: number; nextTalk: number; nextWatch: number; nextPet: number }
+interface Animal extends Walker {
+  kind: AnimalKind;
+  variant: string;
+  /** Cells of its home biome it may roam: [x, z, feetY]. */
+  home: [number, number, number][];
+  followId: string;
+  followUntil: number;
+  petReadyAt: number;
+}
 
 const CONVERSATIONS: [string, string][] = [
   ['Hi!', 'Hey there!'], ["What's up?", 'Just building stuff.'], ['Nice island!', 'I love the lanterns.'],
   ['Want to play?', 'Maybe later!'], ['Did you see the cows?', 'Moo! 😄'], ['Good game earlier!', 'Thanks, rematch soon!'],
 ];
 const SOLO_LINES = ['What a nice day!', 'Anyone up for a game?', 'I like this island.', 'Hmm…', 'Look at that tree!'];
-const ANIMAL_SPEED: Record<AnimalKind, number> = { cow: 0.8, sheep: 0.7, pig: 0.9, cat: 1.4 };
+const ANIMAL_SPEED: Record<AnimalKind, number> = {
+  cow: 0.8, sheep: 0.7, pig: 0.9, chicken: 0.9, rooster: 0.9, chick: 0.8, panda: 0.6, fox: 1.6,
+  duck: 0.8, bee: 1.6, dog: 1.8, cat: 1.4, llama: 0.9, rabbit: 1.7,
+};
 
 class AmbientLife {
   readonly bots: AmbientBot[] = [];
   readonly animals: Animal[] = [];
   /** Walkable columns: "x,z" → feet height (top of the ground + 1). */
   private readonly walk = new Map<string, number>();
+  /** Pond surface for swimmers: "x,z" → height. */
+  private readonly swim = new Map<string, number>();
   private readonly cells: [number, number][] = [];
 
   constructor(
@@ -1949,12 +2281,16 @@ class AmbientLife {
     private readonly hub: MiniGameHub,
     private readonly players: Map<string, Player>,
     private readonly say: (type: 'chat' | 'emoji' | 'emote', id: string, value: string) => void,
+    private readonly onPet: (animalId: string, byId: string, kind: AnimalKind) => void,
   ) {
     const cx = Math.floor(layout.center.x), cz = Math.floor(layout.center.z);
-    for (let x = cx - 21; x <= cx + 21; x++) for (let z = cz - 21; z <= cz + 21; z++) {
-      if (Math.hypot(x - cx, z - cz) > 20) continue;
-      for (let y = 12; y >= 2; y--) {
-        const ground = getBlock(grid.get(x, y, z));
+    const waterId = blockId('water');
+    for (let x = cx - 49; x <= cx + 49; x++) for (let z = cz - 49; z <= cz + 49; z++) {
+      if (Math.hypot(x - cx, z - cz) > 48) continue;
+      for (let y = 14; y >= 2; y--) {
+        const id = grid.get(x, y, z);
+        if (id === waterId) { if (grid.get(x, y + 1, z) === AIR) this.swim.set(`${x},${z}`, y + 0.65); break; }
+        const ground = getBlock(id);
         if (!ground?.solid || ground.shape !== 'cube') continue;
         const feet = getBlock(grid.get(x, y + 1, z)), head = getBlock(grid.get(x, y + 2, z));
         if (!feet?.solid && !head?.solid) { this.walk.set(`${x},${z}`, y + 1); this.cells.push([x, z]); }
@@ -1969,16 +2305,31 @@ class AmbientLife {
       this.bots.push({
         id, name: `🤖 ${BOT_NAMES[i % BOT_NAMES.length]}`, appearance: randomAppearanceFor(id),
         x: x + 0.5, y: this.walk.get(`${x},${z}`)!, z: z + 0.5, yaw: Math.random() * 6.28, tx: x + 0.5, tz: z + 0.5,
-        moving: false, waitUntil: 0, speed: 1.6, task: { type: 'wander' },
+        moving: false, waitUntil: 0, speed: 1.6, task: { type: 'wander' }, nextPet: Date.now() + 20000 + Math.random() * 30000,
         nextSocial: Date.now() + 4000 + Math.random() * 8000, nextTalk: Date.now() + 6000 + Math.random() * 10000, nextWatch: Date.now() + 15000 + Math.random() * 20000,
       });
     }
-    if (settings.animals) {
-      const kinds: AnimalKind[] = ['cow', 'cow', 'sheep', 'sheep', 'sheep', 'pig', 'pig', 'cat', 'cat'];
-      kinds.forEach((kind, i) => {
-        const [x, z] = rnd();
-        this.animals.push({ id: `a${i}`, kind, x: x + 0.5, y: this.walk.get(`${x},${z}`)!, z: z + 0.5, yaw: Math.random() * 6.28, tx: x + 0.5, tz: z + 0.5, moving: false, waitUntil: 0, speed: ANIMAL_SPEED[kind] });
-      });
+    // Animals live in their home biome (ducks also swim on the pond, bees fly over the meadow).
+    const rngA = createRng(settings.worldSeed ^ 0x5eed);
+    let n = 0;
+    for (const kind of settings.animals) {
+      const biome = layout.biomes.find((b) => b.biome === ANIMAL_BIOME[kind]);
+      if (!biome) continue;
+      const home: [number, number, number][] = [];
+      const r2 = biome.r * biome.r;
+      const swimmer = (SWIMMING as readonly string[]).includes(kind), flyer = (FLYING as readonly string[]).includes(kind);
+      for (const [key, y] of this.walk) { const [x, z] = key.split(',').map(Number); if ((x + 0.5 - biome.x) ** 2 + (z + 0.5 - biome.z) ** 2 <= r2) home.push([x, z, y]); }
+      if (swimmer) for (const [key, y] of this.swim) { const [x, z] = key.split(',').map(Number); if ((x + 0.5 - biome.x) ** 2 + (z + 0.5 - biome.z) ** 2 <= r2) home.push([x, z, y]); }
+      if (home.length === 0) continue;
+      const count = Math.max(1, Math.round(((ANIMAL_BASE_COUNT[kind] ?? 2) * settings.animalsPerKind) / 2));
+      for (let i = 0; i < count; i++) {
+        const [x, z, y] = home[Math.floor(rngA() * home.length)];
+        this.animals.push({
+          id: `a${n++}`, kind, variant: pickVariant(kind, rngA), home,
+          x: x + 0.5, y: flyer ? y + 1.1 : y, z: z + 0.5, yaw: rngA() * 6.28, tx: x + 0.5, tz: z + 0.5,
+          moving: false, waitUntil: 0, speed: ANIMAL_SPEED[kind], followId: '', followUntil: 0, petReadyAt: 0,
+        });
+      }
     }
   }
 
@@ -1986,10 +2337,64 @@ class AmbientLife {
     const now = Date.now();
     this.assignInvites(now, joinAfterMs);
     for (const b of this.bots) this.tickBot(b, dt, now);
-    for (const a of this.animals) {
-      if (!a.moving && now >= a.waitUntil) this.pickTarget(a, 8);
-      this.step(a, dt, false, () => { a.waitUntil = now + 3000 + Math.random() * 9000; });
+    for (const a of this.animals) this.tickAnimal(a, dt, now);
+  }
+
+  /** Position of a player or bot (for petting and following). */
+  private posOf(id: string): { x: number; z: number; y: number } | null {
+    const p = this.players.get(id);
+    if (p) return p;
+    return this.bots.find((b) => b.id === id) ?? null;
+  }
+
+  /** A player or bot pets an animal: it reacts (heart + sound on every client) and follows them for a while. */
+  pet(byId: string, animalId: string): boolean {
+    const a = this.animals.find((x) => x.id === animalId);
+    const by = this.posOf(byId);
+    const now = Date.now();
+    if (!a || !by || now < a.petReadyAt || Math.hypot(by.x - a.x, by.z - a.z) > PET_RADIUS + 0.6) return false;
+    a.petReadyAt = now + 2500;
+    a.followId = byId;
+    a.followUntil = now + 12000;
+    a.moving = false;
+    a.yaw = Math.atan2(by.x - a.x, by.z - a.z);
+    this.onPet(a.id, byId, a.kind);
+    return true;
+  }
+
+  private tickAnimal(a: Animal, dt: number, now: number): void {
+    const flyer = (FLYING as readonly string[]).includes(a.kind), swimmer = (SWIMMING as readonly string[]).includes(a.kind);
+    if (a.followId && now < a.followUntil) {
+      const f = this.posOf(a.followId);
+      if (f) {
+        const d = Math.hypot(f.x - a.x, f.z - a.z);
+        if (d > 1.8) { a.tx = f.x; a.tz = f.z; a.moving = true; this.moveAnimal(a, dt, flyer, swimmer, true, 1.6); }
+        else { a.moving = false; a.yaw = Math.atan2(f.x - a.x, f.z - a.z); }
+        return;
+      }
     }
+    a.followId = '';
+    if (!a.moving && now >= a.waitUntil) {
+      const [x, z] = a.home[Math.floor(Math.random() * a.home.length)];
+      a.tx = x + 0.5; a.tz = z + 0.5; a.moving = true;
+    }
+    this.moveAnimal(a, dt, flyer, swimmer, false, 1);
+    if (!a.moving && a.waitUntil < now) a.waitUntil = now + (flyer ? 800 : 3000) + Math.random() * (flyer ? 2500 : 9000);
+  }
+
+  private moveAnimal(a: Animal, dt: number, flyer: boolean, swimmer: boolean, following: boolean, speedMul: number): void {
+    if (!a.moving) return;
+    const dx = a.tx - a.x, dz = a.tz - a.z, d = Math.hypot(dx, dz);
+    if (d < 0.3) { a.moving = false; return; }
+    const k = Math.min(1, (a.speed * speedMul * dt) / d);
+    const nx = a.x + dx * k, nz = a.z + dz * k;
+    const key = `${Math.floor(nx)},${Math.floor(nz)}`;
+    const ground = this.walk.get(key) ?? (swimmer ? this.swim.get(key) : undefined);
+    if (!flyer && (ground === undefined || Math.abs(ground - a.y) > 1.01)) {
+      if (!following) { a.moving = false; return; }
+    } else if (ground !== undefined) a.y = flyer ? ground + 1.1 : ground;
+    a.x = nx; a.z = nz;
+    a.yaw = Math.atan2(dx, dz);
   }
 
   /** An invite nobody answered for a while gets a free bot walking over to play. */
@@ -2039,6 +2444,15 @@ class AmbientLife {
       }
       return;
     }
+    if (task.type === 'pet') {
+      const a = this.animals.find((x) => x.id === task.animalId);
+      if (!a || now > task.until) { this.toWander(b); return; }
+      if (Math.hypot(a.x - b.x, a.z - b.z) < 2) { b.moving = false; this.pet(b.id, a.id); this.toWander(b); return; }
+      b.tx = a.x; b.tz = a.z; b.moving = true;
+      this.step(b, dt, false, () => undefined);
+      if (!b.moving) this.toWander(b);
+      return;
+    }
     if (task.type === 'watch') {
       const game = this.hub.listing().find((g) => g.id === task.gameId);
       if (!game || game.phase === 'over' || now > task.until) { this.toWander(b); return; }
@@ -2071,6 +2485,11 @@ class AmbientLife {
         b.tx = g.x + Math.cos(a) * 3; b.tz = g.z + Math.sin(a) * 3; b.moving = true;
         return;
       }
+    }
+    if (now >= b.nextPet) {
+      b.nextPet = now + 30000 + Math.random() * 40000;
+      const near = this.animals.filter((a) => Math.hypot(a.x - b.x, a.z - b.z) < 15);
+      if (near.length) { b.task = { type: 'pet', animalId: near[Math.floor(Math.random() * near.length)].id, until: now + 15000 }; return; }
     }
     if (now >= b.nextSocial) {
       b.nextSocial = now + 10000 + Math.random() * 15000;
@@ -2153,7 +2572,7 @@ export default class BlocksyRoom extends Room {
   onCreate(options: Record<string, unknown> = {}): void {
     this.settings = readSettings(this.roomName);
     this.multiplayerId = sanitizeMultiplayerId(options.multiplayerId, DEFAULT_MULTIPLAYER_ID);
-    this.layout = generateIsland(this.grid, this.settings.worldSeed);
+    this.layout = generateIsland(this.grid, this.settings.worldSeed, { biomes: biomesFor(this.settings.animals) });
     this.startedAt = Date.now();
     this.stateTimer = this.clock.setInterval(() => {
       this.life?.tick(STATE_INTERVAL_MS / 1000, this.settings.botJoinAfterSec * 1000);
@@ -2170,7 +2589,7 @@ export default class BlocksyRoom extends Room {
       if (type === 'chat') this.broadcast('chat', { sessionId: id, text: value });
       else if (type === 'emoji') this.broadcast('emoji', { sessionId: id, id: value });
       else if (!this.hub.playing(id)) this.broadcast('emote', { sessionId: id, id: value });
-    });
+    }, (animalId, byId, kind) => this.broadcast('animal', { id: animalId, by: byId, kind }));
     // The session timer starts after the first join, once the match config is known (see startSessionTimer).
 
     this.onMessage('move', (c: Client, m: ClientMessages['move']) => { if (this.guard(c, 'move')) this.handleMove(c, m); });
@@ -2195,6 +2614,10 @@ export default class BlocksyRoom extends Room {
     });
     this.onMessage('mgInvite', (c: Client, m: { kind?: unknown }) => {
       if (this.guard(c, 'mgInvite') && isObj(m) && isMiniGameKind(m.kind)) this.hub.invite(c.sessionId, m.kind);
+    });
+    this.onMessage('pet', (c: Client, m: { animalId?: unknown }) => {
+      if (!this.guard(c, 'pet') || !isObj(m) || typeof m.animalId !== 'string' || this.hub.locked(c.sessionId)) return;
+      this.life.pet(c.sessionId, m.animalId);
     });
     this.onMessage('mgNpc', (c: Client, m: { npcId?: unknown }) => {
       if (!this.guard(c, 'mgNpc') || !isObj(m) || typeof m.npcId !== 'string') return;
@@ -2408,7 +2831,7 @@ export default class BlocksyRoom extends Room {
         grounded: true, held: AIR, tool: 'none', action: 0, ...this.hub.tags(b.id),
       });
     }
-    const animals = this.life.animals.map((a) => ({ id: a.id, kind: a.kind, x: round3(a.x), y: round3(a.y), z: round3(a.z), yaw: round3(a.yaw), moving: a.moving }));
+    const animals = this.life.animals.map((a) => ({ id: a.id, kind: a.kind, variant: a.variant, x: round3(a.x), y: round3(a.y), z: round3(a.z), yaw: round3(a.yaw), moving: a.moving }));
     this.broadcast('state', {
       t: Date.now(),
       animals,

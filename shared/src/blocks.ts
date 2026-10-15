@@ -66,6 +66,13 @@ export const BLOCKS: readonly BlockDef[] = [
   def(27, 'tall_grass', 'Grass Tuft', ['tall_grass'], plant()),
   // Indestructible base layer of the island. Never sold, never removable.
   def(28, 'island_core', 'Island Core', ['island_core'], { purchasable: false, removable: false }),
+  // Biome blocks
+  def(29, 'water', 'Water', ['water'], { layer: 2, solid: false, removable: false, targetable: false, purchasable: false, replaceable: true }),
+  def(30, 'hay', 'Hay Bale', ['hay_top', 'hay_side', 'hay_top']),
+  def(31, 'beehive', 'Beehive', ['hive_top', 'hive_side', 'hive_top'], { category: 'decor' }),
+  def(32, 'spruce_log', 'Spruce Log', ['spruce_log_top', 'spruce_log_side', 'spruce_log_top']),
+  def(33, 'spruce_leaves', 'Spruce Leaves', ['spruce_leaves'], { layer: 1 }),
+  def(34, 'bamboo', 'Bamboo', ['bamboo'], plant({ replaceable: false })),
 ];
 
 const byId: (BlockDef | undefined)[] = [];

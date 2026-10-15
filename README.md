@@ -133,7 +133,32 @@ The server simulates everything below, so every player sees the same bots and an
 - Chess: captures for profit and avoids leaving pieces hanging.
 - Ludo: prefers finishing, capturing and leaving base.
 
-**Animals** (`animals: true`): cows, sheep, pigs and cats wander the meadows.
+**Animals and biomes.** The default island is bigger (176 × 176). Around the village are the biomes where the animals live:
+
+| Biome | Animals |
+|---|---|
+| Village | 🐕 dogs, 🐈 cats |
+| Farm (fenced pasture, hay bales, coop) | 🐄 cows, 🐑 sheep, 🐖 pigs, 🐔 hens, 🐓 roosters, 🐥 chicks |
+| Bamboo grove | 🐼 pandas |
+| Pine forest | 🦊 foxes, 🐇 rabbits |
+| Pond | 🦆 ducks (they swim) |
+| Flower meadow with beehives | 🐝 bees (they fly) |
+| Highlands (stepped hills) | 🦙 llamas |
+
+- **Colours:** each animal gets a realistic colour variant, for example:
+  - cows: Holstein, brown or black;
+  - sheep: white, grey, brown or black;
+  - ducks: mallard, hen or white;
+  - cats: orange, black, grey, white or calico;
+  - also red or arctic foxes, and dogs, llamas and rabbits in several colours.
+- **Petting:** press **E** next to an animal. It hops, shows ❤️ and its sound ("Moo!", "Quack!"…), and follows you for about 12 seconds. Wandering bots pet animals too.
+- **Choosing animals** (Custom settings):
+  - `"animals": true` gives all 14 kinds;
+  - `false` gives none;
+  - a list such as `["cow", "duck", "cat"]` gives only those.
+
+  A biome whose animals are all off is not built. For example, with no ducks there is no pond, and with no pandas there is no bamboo grove. `animalsPerKind` (1–6, default 2) sets how many of each.
+
 
 ## Controls
 

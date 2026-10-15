@@ -11,6 +11,7 @@ export const TILE_KEYS = [
   'log_side', 'log_top', 'leaves', 'glass', 'sand', 'path_top', 'gravel', 'farmland_top', 'wool_white', 'wool_teal',
   'wool_red', 'wool_yellow', 'wool_blue', 'crafting_top', 'crafting_side', 'chest_top', 'chest_side', 'lantern',
   'flower_white', 'flower_yellow', 'tall_grass', 'island_core',
+  'water', 'hay_top', 'hay_side', 'hive_top', 'hive_side', 'spruce_log_top', 'spruce_log_side', 'spruce_leaves', 'bamboo',
 ] as const;
 
 type C = [number, number, number, number];
@@ -144,6 +145,25 @@ const painters: Record<string, (t: Tile) => void> = {
       return x === 7 || x === 8 ? mul(k, 0.55) : k;
     }
     return c(44, 40, 38);
+  }),
+  water: (t) => t.each((x, y) => mul(c(52, 128, 205, 170), (Math.sin((x + y * 0.5) * 0.8) * 0.06 + 1) * t.jit(0.04))),
+  hay_top: (t) => t.each((x, y) => mul(c(214, 178, 72), ((x + y) % 3 === 0 ? 0.85 : 1) * t.jit(0.08))),
+  hay_side: (t) => t.each((_x, y) => (y === 4 || y === 11 ? c(150, 66, 40) : mul(c(214, 178, 72), (y % 2 ? 0.92 : 1) * t.jit(0.08)))),
+  hive_top: (t) => { t.noise(c(196, 150, 70), 0.06); frame(t, c(120, 80, 34)); },
+  hive_side: (t) => t.each((x, y) => {
+    if (x >= 6 && x <= 9 && y >= 3 && y <= 5) return c(40, 26, 14);            // entrance
+    return mul(y % 4 === 0 ? c(160, 112, 46) : c(222, 172, 74), t.jit(0.06));
+  }),
+  spruce_log_top: (t) => t.each((x, y) => {
+    const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+    return mul(d >= 7 ? c(58, 40, 24) : Math.floor(d) % 2 === 0 ? c(122, 88, 52) : c(98, 70, 42), t.jit(0.04));
+  }),
+  spruce_log_side: (t) => t.each((x) => mul(c(70, 48, 28), (x % 3 === 0 ? 0.75 : 1) * t.jit(0.07))),
+  spruce_leaves: (t) => t.each(() => (t.rng() < 0.12 ? CLEAR : mul(c(44, 92, 52), t.jit(0.16) * (t.rng() < 0.2 ? 0.75 : 1)))),
+  bamboo: (t) => t.each((x, y) => {
+    if (x >= 6 && x <= 9) return y % 5 === 0 ? c(96, 140, 44) : mul(c(128, 184, 60), x === 6 ? 0.85 : 1);
+    if ((y === 11 && x >= 10 && x <= 13) || (y === 12 && x >= 11 && x <= 14) || (y === 6 && x >= 2 && x <= 5)) return c(84, 156, 56);
+    return CLEAR;
   }),
   flower_white: (t) => flower(t, c(246, 246, 240), c(242, 200, 40)),
   flower_yellow: (t) => flower(t, c(248, 210, 44), c(214, 120, 30)),

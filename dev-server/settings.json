@@ -11,5 +11,6 @@
   "ludoTurnSec": 10,
   "ambientBots": 4,
   "animals": true,
-  "botJoinAfterSec": 5
+  "botJoinAfterSec": 5,
+  "animalsPerKind": 2
 }
