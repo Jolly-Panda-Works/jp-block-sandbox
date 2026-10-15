@@ -269,7 +269,8 @@ textarea:focus { border-color: var(--accent); }
 .lobby-members { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 .lobby-members li { background: var(--tile); padding: 4px 10px; border-radius: 8px; font-weight: 700; }
 .mg-float { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: auto; z-index: 2; }
-.mg-board-wrap { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 2; }
+/* Board panel on the left; the camera view is shifted so the players and table are on the right. */
+.mg-board-wrap { position: absolute; inset: 0; display: grid; place-items: center start; padding-left: max(16px, 3vw); pointer-events: none; z-index: 2; }
 .mg-panel { pointer-events: auto; width: min(460px, 94vw); display: flex; flex-direction: column; gap: 10px; }
 .mg-players { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 .mg-chip { border: 2px solid; border-radius: 10px; padding: 4px 10px; font-weight: 800; font-size: 14px; background: var(--tile); }
@@ -317,3 +318,14 @@ textarea:focus { border-color: var(--accent); }
 .rps-big { font-size: 58px; padding: 0 40px; }
 .rps-foot { pointer-events: auto; padding: 10px 18px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .rps-foot small { color: var(--sub); }
+
+/* ---------- Always landscape ---------- */
+.rotator { position: fixed; inset: 0; }
+.rotator > * { height: 100%; }
+@media (orientation: portrait) and (pointer: coarse) {
+  /* Held upright and the browser can't lock orientation: rotate the whole game to landscape. */
+  .rotator { inset: auto; top: 0; left: 0; width: 100vh; height: 100vw; transform-origin: top left; transform: rotate(90deg) translateY(-100%); }
+}
+.playing-as { display: flex; gap: 8px; align-items: center; justify-content: center; color: var(--sub); }
+.playing-as b { color: var(--text); }
+.setting input { flex: 1; min-width: 0; padding: 6px 10px; }

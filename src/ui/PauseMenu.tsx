@@ -1,5 +1,9 @@
 import { asset } from '../assets';
-import { useGame } from '../state/store';
+import { useState } from 'react';
+import { MAX_NAME_LENGTH, sanitizeName } from '@jp/blocksy-shared';
+import { saveName, useGame } from '../state/store';
+import { send } from '../net/network';
+import { platform } from '../net/platform';
 import { inviteLink } from '../net/config';
 import { openPanel } from '../game/pointer';
 import { Keycap } from './Hud';
@@ -12,7 +16,16 @@ const CONTROLS: [string, string][] = [
 ];
 
 export function PauseMenu() {
-  const { sensitivity, invertY, multiplayerId, showToast } = useGame();
+  const { sensitivity, invertY, multiplayerId, showToast, name } = useGame();
+  const [newName, setNewName] = useState(name);
+  const rename = () => {
+    const clean = sanitizeName(newName);
+    saveName(clean);
+    setNewName(clean);
+    send('rename', { name: clean });
+    if (platform.configured()) void platform.updateName(clean).catch(() => undefined);
+    showToast(`You are now ${clean}`);
+  };
   const invite = async () => {
     const link = inviteLink(multiplayerId);
     try { await navigator.clipboard.writeText(link); showToast('Invite link copied'); } catch { window.prompt('Invite link', link); }
@@ -20,7 +33,7 @@ export function PauseMenu() {
   return (
     <div className="overlay">
       <div className="card panel pause">
-        <header><img className="menu-logo" src={asset("blocksy-logo-light.png")} alt="Blocksy" /><h2>Menu</h2></header>
+        <header><span className="muted">⚙️ Settings</span><img className="menu-logo" src={asset("blocksy-logo-light.png")} alt="Blocksy" /><h2>Menu</h2></header>
         <button className="primary wide" onClick={() => openPanel('none')}>Resume</button>
         <div className="pause-row">
           <button onClick={() => openPanel('shop')}>🧱 Shop</button>
@@ -29,6 +42,11 @@ export function PauseMenu() {
           <button onClick={() => openPanel('social')}>😊 Social</button>
         </div>
         {multiplayerId && <button className="wide" onClick={invite}>🔗 Copy invite link</button>}
+        <form className="setting" onSubmit={(e) => { e.preventDefault(); rename(); }}>
+          <span>Your name</span>
+          <input value={newName} maxLength={MAX_NAME_LENGTH} dir="auto" onChange={(e) => setNewName(e.target.value)} />
+          <button disabled={!newName.trim() || sanitizeName(newName) === name}>Save</button>
+        </form>
         <div className="setting">
           <span>Mouse sensitivity</span>
           <button onClick={() => useGame.setState({ sensitivity: Math.max(0.2, +(sensitivity - 0.1).toFixed(1)) })}>−</button>

@@ -1,6 +1,6 @@
 /**
  * LOCAL DEVELOPMENT mock of the Rastaar backend endpoints the game uses (see docs/BACKEND-API.md).
- * Sign-in: any phone number, code 1234. Data lives in memory. Never deployed.
+ * Guest sign-in per device (no phone number). Data lives in memory. Never deployed.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -10,6 +10,7 @@ interface User { id: string; username: string }
 
 export const matches = new Map<string, Match>();
 const sessions = new Map<string, User>();
+const users = new Map<string, User>();
 const PUBLIC_ID = '00000000-0000-4000-8000-000000000001';
 matches.set(PUBLIC_ID, { id: PUBLIC_ID, name: 'Sunny Isle (public)', maxPlayers: 8, createdBy: 'system' });
 
@@ -40,7 +41,7 @@ function cors(req: IncomingMessage, res: ServerResponse): void {
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin ?? '*');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
 }
 
 const userOf = (req: IncomingMessage): User | undefined =>
@@ -53,18 +54,16 @@ export async function handle(req: IncomingMessage, res: ServerResponse, liveCoun
   cors(req, res);
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return true; }
 
-  if (req.method === 'POST' && url === '/api/v1/auth/otp/send') {
-    const { phone } = await readJson(req);
-    if (typeof phone !== 'string' || !/^\+?\d{8,15}$/.test(phone)) return send(res, 400, 'Enter a valid phone number.');
-    console.log(`[mock-backend] OTP for ${phone}: 1234`);
-    return send(res, 200, { sent: true });
-  }
-  if (req.method === 'POST' && url === '/api/v1/auth/otp/verify') {
-    const { phone, code } = await readJson(req);
-    if (typeof phone !== 'string' || code !== '1234') return send(res, 400, 'Wrong code (the local dev code is 1234).');
-    const user = { id: uuidFrom(phone), username: `Player ${phone.slice(-4)}` };
+  if (req.method === 'POST' && url === '/api/v1/auth/guest') {
+    const { deviceId, name } = await readJson(req);
+    if (typeof deviceId !== 'string' || !/^[A-Za-z0-9-]{4,64}$/.test(deviceId)) return send(res, 400, 'Missing device id.');
+    const id = uuidFrom(deviceId);
+    const user = users.get(id) ?? { id, username: 'Player' };
+    if (typeof name === 'string' && name.trim()) user.username = name.trim().slice(0, 24);
+    users.set(id, user);
     const accessToken = randomUUID();
     sessions.set(accessToken, user);
+    console.log(`[mock-backend] guest sign-in: ${user.username} (${id.slice(0, 8)}…)`);
     return send(res, 200, { accessToken, user });
   }
 
@@ -72,6 +71,11 @@ export async function handle(req: IncomingMessage, res: ServerResponse, liveCoun
   if (!user) return send(res, 401, 'Not signed in.');
 
   if (req.method === 'GET' && url === '/api/v1/client/me') return send(res, 200, user);
+  if (req.method === 'PATCH' && url === '/api/v1/client/me') {
+    const { username } = await readJson(req);
+    if (typeof username === 'string' && username.trim()) user.username = username.trim().slice(0, 24);
+    return send(res, 200, user);
+  }
 
   if (url === GAME_PREFIX && req.method === 'GET') {
     const list = await Promise.all([...matches.values()].map(async (m) => ({ ...m, playerCount: await liveCount(m.id) })));

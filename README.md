@@ -26,7 +26,7 @@ Notes:
 
 ## How players get in (with the backend configured)
 
-1. **Sign in on the website:** phone number, then the one-time code (a Rastaar account).
+1. **First visit:** the player enters a display name, which is saved on the device. Each browser gets a guest account automatically, so there is no phone number or password. The name can be changed later in **Settings** (Esc).
 2. **Lobby:**
    - **Rooms list:** each room shows its name, a live player count (`3 / 8`) and Join. Join is disabled while a room is full. The list refreshes every 5 seconds.
    - **Find a room:** paste a room id or invite link.
@@ -68,7 +68,7 @@ npm run dev:all    # local game server on ws://localhost:2567 + game on http://l
 `dev-server/` runs, on http://localhost:2567:
 
 - the same `index.ts` that is deployed on Rastaar (`dev-server/game/index.ts`), with a local stand-in for `@rastaar/game-sdk`;
-- a mock of the Rastaar backend: sign in with any phone number and code **1234**; create, list and search rooms; game tokens.
+- a mock of the Rastaar backend: guest accounts, create, list and search rooms, and game tokens.
 
 Custom settings come from `dev-server/settings.json`, and match results are only logged.
 

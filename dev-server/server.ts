@@ -30,5 +30,5 @@ const gameServer = new colyseus.Server({ transport: new WebSocketTransport({ ser
 gameServer.define('blocksy', BlocksyRoom).filterBy(['multiplayerId']);
 
 gameServer.listen(PORT).then(() => {
-  console.log(`[dev-server] Blocksy + mock backend on http://localhost:${PORT}   (sign in with any phone, code 1234)`);
+  console.log(`[dev-server] Blocksy + mock backend on http://localhost:${PORT}   (guest accounts, no sign-in needed)`);
 });

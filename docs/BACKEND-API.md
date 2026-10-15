@@ -1,6 +1,6 @@
 # Blocksy — backend API needed for "sign in from the website"
 
-The Blocksy website, hosted on GitHub Pages at `https://jolly-panda-works.github.io/jp-block-sandbox/`, calls the Rastaar backend directly. Five endpoints are needed. `POST /client/realtime/token` already exists; the other four are needed for sign-in and the room browser.
+The Blocksy website, hosted on GitHub Pages at `https://jolly-panda-works.github.io/jp-block-sandbox/`, calls the Rastaar backend directly. Six endpoints are needed. `POST /client/realtime/token` already exists; the other five are needed for guest sign-in, renaming and the room browser.
 
 The game reads responses leniently:
 
@@ -18,12 +18,14 @@ Allow the origin `https://jolly-panda-works.github.io` with:
 
 In cookie mode, also send `Access-Control-Allow-Credentials: true`, and the session cookie must use `SameSite=None; Secure`.
 
-## Authentication
+## Authentication: guest accounts (no phone number)
 
-Choose one:
+The first time someone opens the game, they enter a display name; nothing else is asked. The browser keeps a random `deviceId`, and the game signs in as a guest with it. The same browser is therefore always the same player: owned blocks and appearance follow the account. The player can change their name in Settings later.
 
-- **bearer**, recommended for a different site: `verify` returns an access token, and the game sends `Authorization: Bearer <token>` on every call.
-- **cookie**: `verify` sets the user's session cookie.
+Choose one auth mode:
+
+- **bearer**, recommended for a different site: `guest` returns an access token, and the game sends `Authorization: Bearer <token>` on every call.
+- **cookie**: `guest` sets a session cookie.
 
 Build-time setting: `VITE_API_AUTH=bearer|cookie`.
 
@@ -31,9 +33,9 @@ Build-time setting: `VITE_API_AUTH=bearer|cookie`.
 
 | # | Method and path (default) | Body | Response (`data`) | Env override |
 |---|---|---|---|---|
-| 1 | `POST /api/v1/auth/otp/send` | `{ "phone": "0912…" }` | anything (2xx = SMS sent) | `VITE_AUTH_OTP_SEND_PATH` |
-| 2 | `POST /api/v1/auth/otp/verify` | `{ "phone", "code" }` | `{ "accessToken": "…", "user": { "id": "<uuid>", "username": "…" } }` (`token`/`access_token` also accepted) | `VITE_AUTH_OTP_VERIFY_PATH` |
-| 3 | `GET /api/v1/client/me` | – | `{ "id": "<uuid>", "username": "…" }` | `VITE_ME_PATH` |
+| 1 | `POST /api/v1/auth/guest` | `{ "deviceId": "<random id>", "name": "Ali" }` | `{ "accessToken": "…", "user": { "id": "<uuid>", "username": "Ali" } }` (`token`/`access_token` also accepted). Same `deviceId` → same user. | `VITE_AUTH_GUEST_PATH` |
+| 2 | `GET /api/v1/client/me` | – | `{ "id": "<uuid>", "username": "…" }` | `VITE_ME_PATH` |
+| 3 | `PATCH /api/v1/client/me` | `{ "username": "…" }` | the updated user (name changed in Settings) | `VITE_ME_PATH` |
 | 4a | `GET /api/v1/client/multiplayer/games/blocksy/matches` | – | `[ Room, … ]` (or `{ items }`, `{ matches }`, `{ rooms }`) — open Blocksy matches | `VITE_ROOMS_PATH` (`{game}` = game key) |
 | 4b | `POST /api/v1/client/multiplayer/games/blocksy/matches` | `{ "name": "…", "maxPlayers": 2..8 }` | `Room` (the new match) | same as 4a |
 | 5 | `GET /api/v1/client/multiplayer/matches/{id}` | – | `Room`, or `404` | `VITE_ROOM_PATH` |
@@ -60,4 +62,4 @@ Accepted variants:
 
 ## Reference implementation
 
-`dev-server/mockBackend.ts` implements exactly this contract, in memory. Sign-in accepts any phone number with code 1234.
+`dev-server/mockBackend.ts` implements exactly this contract, in memory. Every browser gets a guest account automatically.

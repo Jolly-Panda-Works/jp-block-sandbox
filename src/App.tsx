@@ -86,9 +86,10 @@ export function App() {
     return () => document.removeEventListener('pointerlockchange', change);
   }, []);
 
-  if (phase !== 'playing') return <Entry />;
+  if (phase !== 'playing') return <div className="rotator"><Entry /></div>;
 
   return (
+    <div className="rotator">
     <div className={`app ${isTouch ? 'touch' : ''}`}>
       <Canvas className="game" shadows flat dpr={[1, 2]} camera={{ fov: 72, near: 0.05, far: 600 }} gl={{ antialias: true }}
         onPointerDown={() => { if (useGame.getState().panel === 'none') lockPointer(); }}>
@@ -101,6 +102,7 @@ export function App() {
       {panel === 'build' && <BuildPanel />}
       {panel === 'games' && <GamesPanel />}
       {panel === 'pause' && <PauseMenu />}
+    </div>
     </div>
   );
 }

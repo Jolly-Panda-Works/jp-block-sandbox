@@ -45,7 +45,7 @@ function Outline({ color }: { color: string }) {
  * block targeting, placement and removal (optimistic, confirmed by the server) → network updates.
  */
 export function LocalPlayer() {
-  const { camera } = useThree();
+  const { camera, size } = useThree();
   const sessionId = useGame((s) => s.sessionId) ?? 'local';
   const appearance = useGame((s) => s.profile.appearance);
   const held = useGame(selectedBlock);
@@ -58,7 +58,7 @@ export function LocalPlayer() {
   const armInner = useRef<THREE.Group>(null);
   const st = useRef({
     blend: 1, camDist: TP_DISTANCE, lastGround: -9, lastJump: -9, nextRepeat: 0, sendAt: 0, bodyYaw: 0,
-    faceAimUntil: 0, nearKey: '', nearby: null as StallInfo | null, hidden: false, layerKey: '', lastLook: null as unknown, armSwing: -9, bob: 0,
+    faceAimUntil: 0, nearKey: '', offKey: '', framedFor: '', nearby: null as StallInfo | null, hidden: false, layerKey: '', lastLook: null as unknown, armSwing: -9, bob: 0,
   });
 
   useEffect(() => { camera.layers.disable(1); }, [camera]);
@@ -80,6 +80,25 @@ export function LocalPlayer() {
       b.yaw -= inp.lookX * LOOK_SPEED * game.sensitivity;
       b.pitch += inp.lookY * LOOK_SPEED * game.sensitivity * (game.invertY ? -1 : 1);
       if (inp.wheel && game.tool !== 'none' && !inMg) game.cycleSlot(inp.wheel);
+    }
+    // Entering a mini-game: aim at the table / opponent once, and use third person for board games.
+    if (game.mg && game.mg.id !== s.framedFor) {
+      s.framedFor = game.mg.id;
+      const g = game.games.find((x) => x.id === game.mg!.id);
+      if (game.mg.role === 'player' && game.mg.seatYaw !== undefined) b.yaw = game.mg.seatYaw;
+      else if (g) b.yaw = Math.atan2(g.x - b.x, g.z - b.z);
+      b.pitch = 0.42;
+      if (game.mg.kind !== 'rps' && game.cameraMode === 'first') useGame.setState({ cameraMode: 'third' });
+    }
+    if (!game.mg) s.framedFor = '';
+    // Board games: shift the picture right so players + table sit on the right and the board panel on the left.
+    const boardOpen = !!game.mg && game.mg.kind !== 'rps';
+    const offKey = boardOpen ? `${size.width}x${size.height}` : '';
+    if (offKey !== s.offKey) {
+      s.offKey = offKey;
+      const pc = camera as THREE.PerspectiveCamera;
+      if (boardOpen) pc.setViewOffset(size.width, size.height, -size.width * 0.24, 0, size.width, size.height);
+      else pc.clearViewOffset();
     }
     s.blend = clamp(s.blend + Math.sign((game.cameraMode === 'third' ? 1 : 0) - s.blend) * (dt / TRANSITION), 0, 1);
     const smooth = s.blend * s.blend * (3 - 2 * s.blend);

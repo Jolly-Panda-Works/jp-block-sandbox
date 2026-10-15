@@ -9,8 +9,7 @@ import { config } from './config';
 const env = (import.meta.env ?? {}) as Record<string, string | undefined>;
 const GAME = env.VITE_ROOM_NAME || 'blocksy';
 const paths = {
-  otpSend: env.VITE_AUTH_OTP_SEND_PATH || '/api/v1/auth/otp/send',
-  otpVerify: env.VITE_AUTH_OTP_VERIFY_PATH || '/api/v1/auth/otp/verify',
+  guest: env.VITE_AUTH_GUEST_PATH || '/api/v1/auth/guest',
   me: env.VITE_ME_PATH || '/api/v1/client/me',
   rooms: (env.VITE_ROOMS_PATH || '/api/v1/client/multiplayer/games/{game}/matches').replace('{game}', encodeURIComponent(GAME)),
   room: env.VITE_ROOM_PATH || '/api/v1/client/multiplayer/matches/{id}',
@@ -22,6 +21,20 @@ export interface UserInfo { id: string; name: string }
 
 export const MAX_ROOM_PLAYERS = 8;
 const TOKEN_KEY = 'blocksy.authToken';
+
+/** Stable random id of this browser (the guest account). */
+export function deviceId(): string {
+  try {
+    let id = localStorage.getItem('blocksy.deviceId');
+    if (!id) {
+      id = (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`).replace(/[^A-Za-z0-9-]/g, '');
+      localStorage.setItem('blocksy.deviceId', id);
+    }
+    return id;
+  } catch {
+    return `${Date.now()}`;
+  }
+}
 
 export const authToken = {
   get(): string | null { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } },
@@ -94,16 +107,21 @@ export const platform = {
   /** True if we hold a session (bearer) or may hold one (cookie: checked with me()). */
   hasSession: (): boolean => config.apiAuth === 'cookie' || !!authToken.get(),
 
-  async sendCode(phone: string): Promise<void> {
-    await call('POST', paths.otpSend, { phone });
-  },
-
-  async verifyCode(phone: string, code: string): Promise<UserInfo | null> {
-    const r = (await call<Record<string, unknown>>('POST', paths.otpVerify, { phone, code })) ?? {};
+  /**
+   * Guest sign-in: no phone number or password. The device keeps a random id, so the same browser is
+   * always the same player; the display name is chosen by the player.
+   */
+  async signInGuest(name: string): Promise<UserInfo | null> {
+    const r = (await call<Record<string, unknown>>('POST', paths.guest, { deviceId: deviceId(), name })) ?? {};
     const token = str(r.accessToken, r.token, r.access_token, (r.tokens as Record<string, unknown> | undefined)?.accessToken);
     if (token) authToken.set(token);
     else if (config.apiAuth === 'bearer') throw new ApiError('Sign-in succeeded but no access token was returned.', 0);
     return toUser(r.user ?? r);
+  },
+
+  /** Saves the display name on the backend (best effort). */
+  async updateName(name: string): Promise<void> {
+    await call('PATCH', paths.me, { username: name });
   },
 
   async me(): Promise<UserInfo | null> {

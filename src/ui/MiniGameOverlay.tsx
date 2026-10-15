@@ -4,7 +4,7 @@ import {
   type ChessMove, type MgView, type RpsChoice,
 } from '@jp/blocksy-shared';
 import { useGame } from '../state/store';
-import { send } from '../net/network';
+import { leaveMiniGame, send } from '../net/network';
 
 const SEAT_COLOR = ['#3ddbb9', '#ff7a6b', '#f2c230', '#9b6bd6'];
 const LUDO_HEX = ['#e53935', '#43a047', '#fbc02d', '#1e88e5'];
@@ -41,7 +41,7 @@ function LobbyWait() {
       <b>🎲 Ludo with {host}</b>
       <small>{lobby.members.length}/4 players · waiting for {host} to start</small>
       <ul className="lobby-members">{lobby.members.map((m) => <li key={m.id} dir="auto">{m.name}</li>)}</ul>
-      <button onClick={() => send('mgLeave', {})}>Leave</button>
+      <button onClick={leaveMiniGame}>Leave</button>
     </div>
   );
 }
@@ -81,7 +81,7 @@ function BoardFrame({ v, at, me }: { v: MgView; at: number; me: string }) {
         {v.kind === 'chess' && <Chess v={v} />}
         {v.kind === 'ludo' && <Ludo v={v} />}
         <footer>
-          <button className={v.role === 'spectator' ? 'primary wide' : 'wide'} onClick={() => send('mgLeave', {})}>
+          <button className={v.role === 'spectator' ? 'primary wide' : 'wide'} onClick={leaveMiniGame}>
             {v.role === 'spectator' ? 'Leave spectator' : v.phase === 'over' ? 'Close' : 'Leave game'}
           </button>
         </footer>
@@ -211,7 +211,7 @@ function Rps({ v, at, me }: { v: MgView; at: number; me: string }) {
       <div className="rps-foot card">
         <b>{roundText}</b>
         {v.phase === 'playing' && v.role === 'player' && <small>No choice? Random pick. Keys 1 · 2 · 3</small>}
-        <button onClick={() => send('mgLeave', {})}>{v.role === 'spectator' ? 'Leave spectator' : 'Leave game'}</button>
+        <button onClick={leaveMiniGame}>{v.role === 'spectator' ? 'Leave spectator' : 'Leave game'}</button>
       </div>
     </div>
   );

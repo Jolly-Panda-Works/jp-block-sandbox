@@ -3,28 +3,34 @@ import { GAME_NAME, ISLAND_NAME, MAX_NAME_LENGTH, sanitizeName } from '@jp/block
 import { asset } from '../assets';
 import { connect } from '../net/network';
 import { UUID_RE, config, inviteLink, parseMatchInput, parsePastedToken } from '../net/config';
-import { ApiError, MAX_ROOM_PLAYERS, isFull, platform, type RoomInfo, type UserInfo } from '../net/platform';
-import { useGame } from '../state/store';
+import { ApiError, MAX_ROOM_PLAYERS, isFull, platform, type RoomInfo } from '../net/platform';
+import { saveName, useGame } from '../state/store';
+import { lockLandscape } from '../game/orientation';
 
-type Step = 'checking' | 'login' | 'lobby' | 'direct' | 'test';
+type Step = 'name' | 'checking' | 'lobby' | 'direct' | 'test';
 
 /**
- * Everything before the game starts:
- * - direct: launched with ?jwt=… by the Rastaar app → name + Play.
- * - login:  phone number + one-time code (Rastaar account).
- * - lobby:  room list (name, players/capacity, Join disabled when full), search by room id, create + share a room.
+ * Before the game starts:
+ * - name:   first visit only — choose a display name (saved on this device; change it later in Settings).
+ * - direct: launched with ?jwt=… by the Rastaar app → Play.
+ * - test:   no backend configured → playground test token.
+ * - lobby:  room list (name, players/capacity, Join disabled when full), search by room id, create + share.
+ * There is no phone-number sign-in: each device gets a guest account automatically.
  */
 export function Entry() {
-  const [step, setStep] = useState<Step>(config.jwt ? 'direct' : 'checking');
-  const [user, setUser] = useState<UserInfo | null>(null);
+  const savedName = useGame((s) => s.name);
+  const nextStep = (): Step => (config.jwt ? 'direct' : !platform.configured() ? 'test' : 'checking');
+  const [step, setStep] = useState<Step>(savedName ? nextStep() : 'name');
+  const [error, setError] = useState('');
 
+  // Guest session: reuse the stored token, or create a guest account silently.
   useEffect(() => {
     if (step !== 'checking') return;
-    if (!platform.configured()) { setStep('test'); return; }
-    if (!platform.hasSession()) { setStep('login'); return; }
-    platform.me()
-      .then((u) => { setUser(u); setStep('lobby'); })
-      .catch(() => setStep('login'));
+    const name = useGame.getState().name;
+    (platform.hasSession() ? platform.me().catch(() => null) : Promise.resolve(null))
+      .then((u) => u ?? platform.signInGuest(name))
+      .then(() => setStep('lobby'))
+      .catch((err) => { setError(err instanceof Error ? err.message : 'Could not reach the game backend.'); setStep('lobby'); });
   }, [step]);
 
   return (
@@ -34,25 +40,35 @@ export function Entry() {
           <img className="brand-icon" src={asset('blocksy-icon.png')} alt="" />
           <img className="brand-word" src={asset('blocksy-wordmark-light.png')} alt={GAME_NAME} />
         </div>
+        {step === 'name' && <NameStep onDone={() => setStep(nextStep())} />}
         {step === 'checking' && <p>Connecting…</p>}
         {step === 'direct' && <Direct />}
         {step === 'test' && <TestToken />}
-        {step === 'login' && <Login onDone={(u) => { setUser(u); setStep('lobby'); }} />}
-        {step === 'lobby' && <Lobby user={user} onSignOut={() => { platform.signOut(); setUser(null); setStep('login'); }} />}
+        {step === 'lobby' && <Lobby startError={error} onRename={() => setStep('name')} />}
       </div>
     </div>
   );
 }
 
-function useName(fallback: string) {
-  const saved = useGame((s) => s.name);
-  const [name, setName] = useState(saved || fallback);
-  useEffect(() => { if (!name && fallback) setName(fallback); }, [fallback, name]);
-  return [name, setName] as const;
-}
-
-function NameField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return <input value={value} maxLength={MAX_NAME_LENGTH} placeholder="Your name in the game" dir="auto" onChange={(e) => onChange(e.target.value)} />;
+function NameStep({ onDone }: { onDone: () => void }) {
+  const current = useGame((s) => s.name);
+  const [name, setName] = useState(current);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const clean = sanitizeName(name);
+    saveName(clean);
+    if (platform.configured() && platform.hasSession()) void platform.updateName(clean).catch(() => undefined);
+    lockLandscape();
+    onDone();
+  };
+  return (
+    <form className="entry-form" onSubmit={submit}>
+      <p>Welcome to <b>{ISLAND_NAME}</b>! What should other players call you?</p>
+      <input value={name} maxLength={MAX_NAME_LENGTH} placeholder="Your name" dir="auto" autoFocus onChange={(e) => setName(e.target.value)} />
+      <button className="primary" disabled={!name.trim()}>Continue</button>
+      <small>You can change it any time in Settings.</small>
+    </form>
+  );
 }
 
 function ErrorLine() {
@@ -60,14 +76,19 @@ function ErrorLine() {
   return error ? <div className="error">{error}</div> : null;
 }
 
-/** Launched by the Rastaar app with a game token: only the name is asked. */
+function PlayingAs({ onRename }: { onRename?: () => void }) {
+  const name = useGame((s) => s.name);
+  return <div className="playing-as">Playing as <b dir="auto">{name}</b>{onRename && <button type="button" className="link" onClick={onRename}>change</button>}</div>;
+}
+
+/** Launched by the Rastaar app with a game token. */
 function Direct() {
   const phase = useGame((s) => s.phase);
-  const [name, setName] = useName('');
+  const name = useGame((s) => s.name);
   return (
-    <form className="entry-form" onSubmit={(e) => { e.preventDefault(); void connect(sanitizeName(name)); }}>
+    <form className="entry-form" onSubmit={(e) => { e.preventDefault(); lockLandscape(); void connect(sanitizeName(name)); }}>
       <p>Build together on <b>{ISLAND_NAME}</b>.</p>
-      <NameField value={name} onChange={setName} />
+      <PlayingAs />
       <button className="primary" disabled={phase === 'connecting'}>{phase === 'connecting' ? 'Joining…' : 'Play'}</button>
       <ErrorLine />
     </form>
@@ -81,18 +102,14 @@ const playgroundSnippet = (gameKey: string) => `copy(JSON.stringify(await (await
   body: JSON.stringify({ gameKey: "${gameKey}" }),
 })).json()))`;
 
-/**
- * Test mode (no backend configured): the player gets a short-lived token from the dashboard playground
- * and pastes it here. Every player needs their own fresh token.
- */
+/** Test mode (no backend configured): join with a short-lived token from the dashboard playground. */
 function TestToken() {
   const phase = useGame((s) => s.phase);
-  const [name, setName] = useName('');
+  const name = useGame((s) => s.name);
   const [pasted, setPasted] = useState('');
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
   const snippet = playgroundSnippet(config.roomName);
-
   const copySnippet = async () => {
     try { await navigator.clipboard.writeText(snippet); setCopied(true); } catch { window.prompt('Copy this snippet', snippet); }
   };
@@ -101,77 +118,27 @@ function TestToken() {
     const t = parsePastedToken(pasted);
     if (t.error || !t.jwt) { setError(t.error || 'Paste a token first.'); return; }
     setError('');
+    lockLandscape();
     void connect(sanitizeName(name), { jwt: t.jwt, multiplayerId: t.multiplayerId || undefined, wsUrl: t.wsUrl || undefined });
   };
-
   return (
     <form className="entry-form" onSubmit={join}>
+      <PlayingAs />
       <p>Test mode: join with a token from the Rastaar dashboard playground.</p>
       <ol className="steps">
         <li>Open <a href="https://gameserver.rastar.ir/dashboard" target="_blank" rel="noreferrer">the dashboard</a> in another tab and sign in.</li>
-        <li>In <b>that tab</b>, press F12 → Console (context: <code>top</code>), paste the snippet below and press Enter. The token is copied.</li>
-        <li>Come back here, paste it below and press Join. Each player needs a <b>new</b> token.</li>
+        <li>In <b>that tab</b>, press F12 → Console (context: <code>top</code>), paste the snippet and press Enter.</li>
+        <li>Paste the copied token below and press Join. Each player needs a <b>new</b> token.</li>
       </ol>
       <div className="snippet">
         <pre dir="ltr">{snippet}</pre>
         <button type="button" onClick={() => void copySnippet()}>{copied ? 'Copied ✓' : 'Copy snippet'}</button>
       </div>
-      <NameField value={name} onChange={setName} />
       <textarea value={pasted} onChange={(e) => { setPasted(e.target.value); setError(''); }} rows={3} dir="ltr" spellCheck={false}
         placeholder='Paste the token here ({"jwt": …} or eyJ…)' />
       <button className="primary" disabled={phase === 'connecting' || !pasted.trim()}>{phase === 'connecting' ? 'Joining…' : 'Join'}</button>
       {error && <div className="error">{error}</div>}
       <ErrorLine />
-      <small>Tokens are short-lived — if joining fails with an expiry error, get a fresh one.</small>
-    </form>
-  );
-}
-
-function Login({ onDone }: { onDone: (u: UserInfo | null) => void }) {
-  const [phone, setPhone] = useState('');
-  const [code, setCode] = useState('');
-  const [sent, setSent] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  if (!platform.configured()) {
-    return (
-      <div className="entry-form">
-        <p>This copy of Blocksy is not connected to the Rastaar backend yet.</p>
-        <small>Use a playground test token, set <code>VITE_API_BASE_URL</code> when building, or open the game from the Rastaar app.</small>
-      </div>
-    );
-  }
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError('');
-    try {
-      if (!sent) {
-        await platform.sendCode(phone.trim());
-        setSent(true);
-      } else {
-        const u = await platform.verifyCode(phone.trim(), code.trim());
-        onDone(u ?? (await platform.me().catch(() => null)));
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign-in failed.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <form className="entry-form" onSubmit={submit}>
-      <p>Sign in with your Rastaar account to play online.</p>
-      <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number (09…)" inputMode="tel" dir="ltr" autoFocus disabled={sent} />
-      {sent && <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Code from SMS" inputMode="numeric" dir="ltr" autoFocus />}
-      <button className="primary" disabled={busy || !phone.trim() || (sent && !code.trim())}>
-        {busy ? '…' : sent ? 'Sign in' : 'Send code'}
-      </button>
-      {sent && <button type="button" className="link" onClick={() => { setSent(false); setCode(''); }}>Change number</button>}
-      {error && <div className="error">{error}</div>}
     </form>
   );
 }
@@ -195,12 +162,12 @@ function RoomCard({ room, onJoin, busy }: { room: RoomInfo; onJoin: (r: RoomInfo
   );
 }
 
-function Lobby({ user, onSignOut }: { user: UserInfo | null; onSignOut: () => void }) {
+function Lobby({ startError, onRename }: { startError: string; onRename: () => void }) {
   const phase = useGame((s) => s.phase);
-  const [name, setName] = useName(user?.name ?? '');
+  const name = useGame((s) => s.name);
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [listError, setListError] = useState('');
+  const [listError, setListError] = useState(startError);
   const [query, setQuery] = useState(config.multiplayerId);
   const [found, setFound] = useState<RoomInfo | null | undefined>(undefined);
   const [newName, setNewName] = useState('');
@@ -214,12 +181,15 @@ function Lobby({ user, onSignOut }: { user: UserInfo | null; onSignOut: () => vo
       setRooms(await platform.listRooms());
       setListError('');
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) { onSignOut(); return; }
+      if (err instanceof ApiError && err.status === 401) {
+        // Guest session expired: sign in again silently and retry.
+        try { await platform.signInGuest(useGame.getState().name); setRooms(await platform.listRooms()); setListError(''); return; } catch { /* fall through */ }
+      }
       setListError(err instanceof Error ? err.message : 'Could not load rooms.');
     } finally {
       setLoading(false);
     }
-  }, [onSignOut]);
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -232,10 +202,9 @@ function Lobby({ user, onSignOut }: { user: UserInfo | null; onSignOut: () => vo
     if (!UUID_RE.test(id)) { setFound(null); return; }
     try { setFound(await platform.getRoom(id)); } catch { setFound(null); }
   }, []);
-  // An invite link (?room=…) opens the lobby with that room already looked up.
   useEffect(() => { if (config.multiplayerId) void search(config.multiplayerId); }, [search]);
 
-  const join = (r: RoomInfo) => { void connect(sanitizeName(name), { multiplayerId: r.id }); };
+  const join = (r: RoomInfo) => { lockLandscape(); void connect(sanitizeName(name), { multiplayerId: r.id }); };
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
@@ -248,19 +217,14 @@ function Lobby({ user, onSignOut }: { user: UserInfo | null; onSignOut: () => vo
       setListError(err instanceof Error ? err.message : 'Could not create the room.');
     }
   };
-
   const copy = async (text: string) => {
     try { await navigator.clipboard.writeText(text); setCopied(true); } catch { window.prompt('Copy', text); }
   };
 
   return (
     <div className="lobby">
-      <div className="lobby-top">
-        <NameField value={name} onChange={setName} />
-        <button className="link" onClick={onSignOut}>Sign out</button>
-      </div>
+      <PlayingAs onRename={onRename} />
       <ErrorLine />
-
       <section>
         <h3>Find a room</h3>
         <form className="row-form" onSubmit={(e) => { e.preventDefault(); void search(query); }}>
@@ -270,7 +234,6 @@ function Lobby({ user, onSignOut }: { user: UserInfo | null; onSignOut: () => vo
         {found === null && <small className="muted">No room with that id.</small>}
         {found && <RoomCard room={found} onJoin={join} busy={busy} />}
       </section>
-
       <section>
         <h3>Rooms <button className="link" onClick={() => void refresh()}>refresh</button></h3>
         {loading && <small className="muted">Loading…</small>}
@@ -278,7 +241,6 @@ function Lobby({ user, onSignOut }: { user: UserInfo | null; onSignOut: () => vo
         {!loading && !listError && rooms.length === 0 && <small className="muted">No rooms yet — create the first one below.</small>}
         <div className="room-list">{rooms.map((r) => <RoomCard key={r.id} room={r} onJoin={join} busy={busy} />)}</div>
       </section>
-
       <section>
         <h3>Create a room</h3>
         <form className="row-form" onSubmit={create}>

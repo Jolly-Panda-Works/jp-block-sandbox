@@ -37,8 +37,7 @@ jobs:
           VITE_WS_URL: ${{ vars.VITE_WS_URL || 'wss://gameserver.rastar.ir' }}
           VITE_ROOM_NAME: ${{ vars.VITE_ROOM_NAME || 'blocksy' }}
           VITE_TOKEN_PATH: ${{ vars.VITE_TOKEN_PATH }}
-          VITE_AUTH_OTP_SEND_PATH: ${{ vars.VITE_AUTH_OTP_SEND_PATH }}
-          VITE_AUTH_OTP_VERIFY_PATH: ${{ vars.VITE_AUTH_OTP_VERIFY_PATH }}
+          VITE_AUTH_GUEST_PATH: ${{ vars.VITE_AUTH_GUEST_PATH }}
           VITE_ME_PATH: ${{ vars.VITE_ME_PATH }}
           VITE_ROOMS_PATH: ${{ vars.VITE_ROOMS_PATH }}
           VITE_ROOM_PATH: ${{ vars.VITE_ROOM_PATH }}

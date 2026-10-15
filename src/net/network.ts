@@ -11,7 +11,7 @@ import { dropAnim, getAnim, playEmote, playSwing } from '../render/animState';
 import { UUID_RE, config } from './config';
 import { getRealtimeCredentials } from './api';
 import { readGameToken, secondsLeft } from './jwt';
-import { releasePointer } from '../game/pointer';
+import { lockPointer, openPanel, releasePointer } from '../game/pointer';
 
 /** Latest replicated transform of a remote player; r* fields are the interpolated render values. */
 export interface RemoteState extends PlayerSnapshot {
@@ -33,6 +33,17 @@ let client: Client | null = null;
 let room: Room | null = null;
 let userId = '';
 let sessionEnded = false;
+
+/**
+ * Leave the current mini-game / spectating / lobby and go straight back to normal play: the board closes at
+ * once (no waiting for the server) and, because this runs inside the click, the cursor is captured again.
+ */
+export function leaveMiniGame(): void {
+  send('mgLeave', {});
+  const s = useGame.getState();
+  useGame.setState({ mg: null, lobby: s.lobby && s.lobby.hostId === s.sessionId ? s.lobby : null });
+  lockPointer();
+}
 
 export function send<K extends keyof ClientMessages>(type: K, message: ClientMessages[K]): void {
   room?.send(type, message);
@@ -258,8 +269,10 @@ function attach(r: Room): void {
   r.onMessage('mgLobby', (m: MgLobby | null) => {
     const prev = get().lobby;
     set({ lobby: m });
-    if (m && prev && m.members.length > prev.members.length && m.hostId === r.sessionId) {
-      get().showToast(`${m.members[m.members.length - 1].name} joined your Ludo table — press P to start`);
+    if (m && m.hostId === r.sessionId && m.members.length > (prev?.members.length ?? 1)) {
+      // Someone sat down at the host's Ludo table: show the host the start panel right away.
+      get().showToast(`${m.members[m.members.length - 1].name} joined your Ludo table`);
+      openPanel('games');
     }
     if (m && m.hostId !== r.sessionId && !prev) { releasePointer(); set({ tool: 'none', panel: 'none' }); }
   });

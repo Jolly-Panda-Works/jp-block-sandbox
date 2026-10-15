@@ -67,6 +67,12 @@ interface GameState {
   showBubble: (sessionId: string, b: Omit<Bubble, 'until'>, seconds?: number) => void;
 }
 
+/** Saves the player's display name on this device. */
+export function saveName(name: string): void {
+  try { localStorage.setItem('jp.sandbox.name', name); } catch { /* private mode */ }
+  useGame.setState({ name });
+}
+
 const savedName = (() => {
   const fromUrl = new URLSearchParams(location.search).get('username');
   if (fromUrl) return fromUrl;

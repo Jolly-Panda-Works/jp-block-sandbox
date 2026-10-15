@@ -762,6 +762,7 @@ interface ClientMessages {
   mgMove: { move: MiniGameMove };
   mgLeave: Record<string, never>;
   mgSpectate: { gameId: string };
+  rename: { name: string };
 }
 
 /** Server → client messages. */
@@ -1290,7 +1291,7 @@ interface Player {
 
 /** Messages per second per player. "move" is sent at 15 Hz by the client. */
 const RATE_LIMITS: Record<string, number> = {
-  mgInvite: 2, mgCancel: 2, mgAccept: 2, mgStart: 2, mgMove: 6, mgLeave: 2, mgSpectate: 2,
+  rename: 1, mgInvite: 2, mgCancel: 2, mgAccept: 2, mgStart: 2, mgMove: 6, mgLeave: 2, mgSpectate: 2,
   move: 20, place: 12, remove: 12, hotbar: 10, buy: 5, appearance: 2, restore: 1, chat: 2, emoji: 2, emote: 1,
 };
 const STATE_INTERVAL_MS = 100;
@@ -1335,7 +1336,7 @@ interface HubDeps {
 
 const INVITE_TTL_MS = 3 * 60_000;
 const RPS_REVEAL_MS = 2500;
-const RESULT_HOLD_MS = 4000;
+const RESULT_HOLD_MS = 2500;
 const SEAT_RADIUS = 0.95;
 const pickRandom = <T>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)];
 
@@ -1626,8 +1627,12 @@ class MiniGameHub {
     const s = sid ? this.sessions.get(sid) : undefined;
     if (!s) return;
     this.seatOf.delete(id);
+    s.seatPos = s.seatPos.filter((x) => x.id !== id);
     this.d.send(id, 'mgEnded', { id: s.id });
-    if (s.phase === 'over') return;
+    if (s.phase === 'over') {
+      if (s.seatPos.length === 0) this.close(s); // everyone already left the result screen
+      return;
+    }
     const seat = s.seats.indexOf(id);
     if (s.ludo) {
       s.ludo.state = ludoLeave(s.ludo.state, seat);
@@ -1729,6 +1734,12 @@ export default class BlocksyRoom extends Room {
     });
     this.onMessage('emote', (c: Client, m: ClientMessages['emote']) => {
       if (this.guard(c, 'emote') && isEmoteId(m?.id) && !this.hub.playing(c.sessionId)) this.broadcast('emote', { sessionId: c.sessionId, id: m.id });
+    });
+    this.onMessage('rename', (c: Client, m: { name?: unknown }) => {
+      const p = this.players.get(c.sessionId);
+      if (!p || !this.checkRate(c, 'rename') || !isObj(m)) return;
+      p.username = sanitizeUsername(m.name);
+      this.broadcast('playerMeta', this.metaOf(p));
     });
     this.onMessage('mgInvite', (c: Client, m: { kind?: unknown }) => {
       if (this.guard(c, 'mgInvite') && isObj(m) && isMiniGameKind(m.kind)) this.hub.invite(c.sessionId, m.kind);

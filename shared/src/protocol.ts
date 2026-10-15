@@ -50,6 +50,7 @@ export interface ClientMessages {
   mgMove: { move: MiniGameMove };
   mgLeave: Record<string, never>;
   mgSpectate: { gameId: string };
+  rename: { name: string };
 }
 
 /** Server → client messages. */

@@ -3,6 +3,7 @@ import { touch } from '../game/input';
 import { useGame, selectedBlock } from '../state/store';
 import { getIconUrl } from '../render/textures';
 import { openPanel } from '../game/pointer';
+import { toLocalDelta } from '../game/orientation';
 
 const JOY_RADIUS = 52;
 /** Radians per CSS pixel of drag is LOOK_SPEED × this (touch drags are shorter than mouse sweeps). */
@@ -18,8 +19,9 @@ export function LookArea() {
   const move = (e: RPointerEvent<HTMLDivElement>) => {
     const p = last.current.get(e.pointerId);
     if (!p) return;
-    touch.lookDX += (e.clientX - p.x) * TOUCH_LOOK_SCALE;
-    touch.lookDY += (e.clientY - p.y) * TOUCH_LOOK_SCALE;
+    const [dx, dy] = toLocalDelta(e.clientX - p.x, e.clientY - p.y);
+    touch.lookDX += dx * TOUCH_LOOK_SCALE;
+    touch.lookDY += dy * TOUCH_LOOK_SCALE;
     p.x = e.clientX; p.y = e.clientY;
   };
   const up = (e: RPointerEvent<HTMLDivElement>) => { last.current.delete(e.pointerId); };
@@ -33,7 +35,7 @@ function Joystick() {
   const [knob, setKnob] = useState({ x: 0, y: 0 });
   const update = (e: RPointerEvent<HTMLDivElement>) => {
     const r = base.current!.getBoundingClientRect();
-    let dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+    let [dx, dy] = toLocalDelta(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
     const len = Math.hypot(dx, dy);
     if (len > JOY_RADIUS) { dx *= JOY_RADIUS / len; dy *= JOY_RADIUS / len; }
     setKnob({ x: dx, y: dy });
