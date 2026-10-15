@@ -9,6 +9,7 @@ import { teleportLocal } from '../game/localState';
 import { dropAnim, getAnim, playEmote, playSwing } from '../render/animState';
 import { UUID_RE, config } from './config';
 import { getRealtimeCredentials } from './api';
+import { readGameToken, secondsLeft } from './jwt';
 
 /** Latest replicated transform of a remote player; r* fields are the interpolated render values. */
 export interface RemoteState extends PlayerSnapshot { rx: number; ry: number; rz: number; ryaw: number }
@@ -76,21 +77,47 @@ function describe(err: unknown, wsUrl: string): string {
  * 1. Backend: POST /client/realtime/token { multiplayerId } → { wsUrl, jwt }   (or ?jwt=… in the URL)
  * 2. Game server: joinOrCreate("blocksy", { jwt, multiplayerId, username, avatarUrl, protocolVersion })
  */
-export async function connect(name: string): Promise<void> {
+/** Match/token typed on the join screen take precedence over the URL and build settings. */
+export interface JoinInput { multiplayerId?: string; jwt?: string }
+
+export async function connect(name: string, input: JoinInput = {}): Promise<void> {
   const set = useGame.setState;
   set({ phase: 'connecting', error: null, name, sessionEnded: false, timeLeftMs: 0 });
   try { localStorage.setItem('jp.sandbox.name', name); } catch { /* private mode */ }
   sessionEnded = false;
   // The platform's JWT carries the match id ("mid", a UUID); the local dev server accepts any id.
-  const multiplayerId = config.localDev ? sanitizeMultiplayerId(config.multiplayerId, DEFAULT_MULTIPLAYER_ID) : config.multiplayerId;
+  const directJwt = (input.jwt || config.jwt).trim();
+  let requested = (input.multiplayerId || config.multiplayerId).trim();
+
+  // A game token alone is enough: the match id is its "mid" claim.
+  if (directJwt && !config.localDev) {
+    const claims = readGameToken(directJwt);
+    if (!claims) {
+      set({ phase: 'error', error: "That isn't a Rastaar game token. Copy the whole token (it has two dots: xxxxx.yyyyy.zzzzz)." });
+      return;
+    }
+    const left = secondsLeft(claims);
+    if (left !== null && left <= 0) {
+      set({ phase: 'error', error: 'This game token has expired. Get a new one from the Rastaar app.' });
+      return;
+    }
+    if (typeof claims.mid === 'string') {
+      if (requested && requested.toLowerCase() !== claims.mid.toLowerCase()) {
+        set({ phase: 'error', error: 'This token is for a different match than the match code. Leave the match code empty.' });
+        return;
+      }
+      requested = claims.mid;
+    }
+  }
+  const multiplayerId = config.localDev ? sanitizeMultiplayerId(requested, DEFAULT_MULTIPLAYER_ID) : requested;
   let wsUrl = config.wsUrl;
   if (!config.localDev && !UUID_RE.test(multiplayerId)) {
-    set({ phase: 'error', error: 'No match selected. Open Blocksy from the Rastaar app, or use an invite link (…?multiplayerId=<match id>).' });
+    set({ phase: 'error', error: multiplayerId ? 'That match code is not valid (it should look like 123e4567-e89b-12d3-a456-426614174000).' : 'Enter a match code, or open Blocksy from the Rastaar app / an invite link.' });
     return;
   }
   set({ multiplayerId });
   try {
-    const creds = await getRealtimeCredentials(multiplayerId);
+    const creds = await getRealtimeCredentials(multiplayerId, directJwt);
     wsUrl = creds.wsUrl;
     const options: JoinOptions & { avatarUrl?: string } = {
       jwt: creds.jwt, multiplayerId, username: name, protocolVersion: PROTOCOL_VERSION,

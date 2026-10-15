@@ -912,7 +912,7 @@ export default class BlocksyRoom extends Room {
     });
     this.onMessage('*', (c: Client, type: string | number) => { this.checkRate(c, 'other'); void type; });
     if (this.roomName !== ROOM_NAME) console.warn(`[blocksy] game key is "${this.roomName}", client expects "${ROOM_NAME}"`);
-    console.log(`[blocksy] room ${this.roomId} created (mp=${this.multiplayerId}, seed=${this.settings.worldSeed})`);
+    console.log(`[blocksy] room ${this.roomId} created (seed=${this.settings.worldSeed})`);
   }
 
   async onAuth(_client: Client, options: Partial<JoinOptions> & Record<string, unknown>): Promise<JoinAuth> {
@@ -926,6 +926,7 @@ export default class BlocksyRoom extends Room {
   async onJoin(client: Client, options: Partial<JoinOptions> & Record<string, unknown>, auth: JoinAuth): Promise<void> {
     if (!this.configPromise) {
       this.multiplayerId = auth.multiplayerId; // = JWT "mid", the backend's match id
+      console.log(`[blocksy] room ${this.roomId} serves match ${auth.multiplayerId}${isPlaygroundMatch(auth.multiplayerId) ? ' (playground)' : ''}`);
       this.configPromise = fetchRoomConfig(auth.multiplayerId, this.roomName)
         .then((cfg) => {
           if (isInt(cfg?.maxPlayers) && cfg.maxPlayers > 0) this.maxClients = Math.min(cfg.maxPlayers, MAX_PLAYERS);

@@ -33,11 +33,12 @@ function bearerToken(): string | null {
  * Also accepts `{ data: { … } }` envelopes and `token`/`accessToken` instead of `jwt`.
  * A token passed in the page URL (?jwt=…) is used directly.
  */
-export async function getRealtimeCredentials(multiplayerId: string): Promise<RealtimeCredentials> {
-  if (config.jwt) return { wsUrl: config.wsUrl, jwt: config.jwt };
+export async function getRealtimeCredentials(multiplayerId: string, jwtOverride = ''): Promise<RealtimeCredentials> {
+  const direct = jwtOverride || config.jwt;
+  if (direct) return { wsUrl: config.wsUrl, jwt: direct };
   if (!config.apiBaseUrl && config.localDev) return { wsUrl: config.wsUrl, jwt: `dev:${localDevId()}` };
   if (!config.apiBaseUrl) {
-    throw new Error('No game token. Open Blocksy from the Rastaar app (or a link with ?jwt=…), or configure VITE_API_BASE_URL.');
+    throw new Error('No game token for this match. Paste your game token (JWT) on the join screen, or open Blocksy from the Rastaar app.');
   }
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' };

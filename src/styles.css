@@ -211,3 +211,8 @@ input:focus { border-color: var(--accent); }
 .session-ended img { width: 84px; height: 84px; }
 .session-ended h2 { margin: 0; }
 .session-ended p { margin: 0; color: var(--sub); }
+
+.join-advanced { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.join-advanced small { color: var(--sub); font-size: 12px; }
+button.link { background: transparent; color: var(--accent); padding: 2px; font-weight: 700; text-decoration: underline; }
+button.link:hover { background: transparent; color: #7ff3da; }

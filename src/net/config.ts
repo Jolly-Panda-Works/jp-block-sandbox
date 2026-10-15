@@ -41,6 +41,22 @@ export const config = {
   localDev: env.VITE_LOCAL_DEV === 'true' && import.meta.env.DEV === true,
 } as const;
 
+/**
+ * Accepts a match code typed or pasted by the player: a bare UUID, or a whole link containing
+ * ?multiplayerId=… (and possibly &jwt=…). Returns what it found.
+ */
+export function parseMatchInput(raw: string): { multiplayerId: string; jwt: string } {
+  const text = raw.trim();
+  if (!text) return { multiplayerId: '', jwt: '' };
+  try {
+    const url = new URL(text);
+    return { multiplayerId: url.searchParams.get('multiplayerId') ?? '', jwt: url.searchParams.get('jwt') ?? '' };
+  } catch {
+    const m = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(text);
+    return { multiplayerId: m ? m[0] : text, jwt: '' };
+  }
+}
+
 /** Shareable link to this match. Never contains a jwt or token. */
 export function inviteLink(multiplayerId: string): string {
   const url = new URL(location.href);
