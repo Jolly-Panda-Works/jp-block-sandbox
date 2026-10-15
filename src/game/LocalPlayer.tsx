@@ -13,6 +13,7 @@ import { useGame, selectedBlock } from '../state/store';
 import { Avatar } from '../render/Avatar';
 import { applyGamePose, getAnim, now, playSwing } from '../render/animState';
 import { newCameraRig, solveCamera } from './cameraRig';
+import { blockBreak, blockPlace, footstep, isWaterAt, land, splash } from '../render/particles';
 import { getBlockGeometry, getBlockMaterials } from '../render/textures';
 import { Hammer } from '../render/Hammer';
 
@@ -59,7 +60,7 @@ export function LocalPlayer() {
   const armInner = useRef<THREE.Group>(null);
   const st = useRef({
     blend: 1, rig: newCameraRig(TP_DISTANCE, SHOULDER), lastGround: -9, lastJump: -9, nextRepeat: 0, sendAt: 0, bodyYaw: 0,
-    faceAimUntil: 0, nearKey: '', offKey: '', framedFor: '', nearby: null as StallInfo | null, hidden: false, layerKey: '', lastLook: null as unknown, armSwing: -9, bob: 0,
+    faceAimUntil: 0, stepDist: 0, nearKey: '', offKey: '', framedFor: '', nearby: null as StallInfo | null, hidden: false, layerKey: '', lastLook: null as unknown, armSwing: -9, bob: 0,
   });
 
   useEffect(() => { camera.layers.disable(1); }, [camera]);
@@ -123,7 +124,18 @@ export function LocalPlayer() {
       s.lastGround = s.lastJump = -9; // consume both: no double jumps
     }
     b.vy = Math.max(b.vy - GRAVITY * dt, -MAX_FALL);
+    const vyBefore = b.vy, wasGrounded = b.grounded, wasInWater = isWaterAt(b.x, b.y + 0.2, b.z), prevY = b.y;
     moveBody(g, b, dt, PLAYER_RADIUS, PLAYER_HEIGHT);
+    // Particles: landing dust, footsteps (more when sprinting), splashes in the pond and the sea.
+    if (!wasGrounded && b.grounded && vyBefore < -5) land(b.x, b.y, b.z, Math.min(1, (-vyBefore - 5) / 12));
+    const hsNow = Math.hypot(b.vx, b.vz);
+    if (b.grounded && hsNow > 1.2) {
+      s.stepDist += hsNow * dt;
+      const sprinting = hsNow > WALK * 1.15;
+      if (s.stepDist > (sprinting ? 0.75 : 1.1)) { s.stepDist = 0; footstep(b.x, b.y, b.z, sprinting ? 1.6 : 0.8); }
+    } else s.stepDist = 0.6;
+    if (!wasInWater && isWaterAt(b.x, b.y + 0.2, b.z)) splash(b.x, Math.floor(b.y + 0.2) + 1, b.z);
+    if (game.layout && prevY > game.layout.waterLevel && b.y <= game.layout.waterLevel) splash(b.x, game.layout.waterLevel, b.z, true);
     if (b.y < RESPAWN_BELOW_Y && game.layout) {
       const sp = game.layout.spawn;
       teleportLocal(sp.x, sp.y, sp.z);
@@ -198,7 +210,9 @@ export function LocalPlayer() {
         else {
           const r = evaluateRemoval(g, hit.x, hit.y, hit.z);
           if (r === 'ok') {
+            const broken = g.get(hit.x, hit.y, hit.z);
             g.set(hit.x, hit.y, hit.z, AIR); // optimistic; the server confirms or rolls back
+            blockBreak(hit.x, hit.y, hit.z, broken);
             send('remove', { x: hit.x, y: hit.y, z: hit.z });
             s.faceAimUntil = t + 0.8; s.armSwing = t; playSwing(sessionId);
           } else if (explicit && r === 'protected') game.showToast('This part of the island is protected');
@@ -210,6 +224,7 @@ export function LocalPlayer() {
         else if (!valid) { if (explicit) game.showToast('Aim at a block to build on it'); }
         else if (place) {
           g.set(place[0], place[1], place[2], held);
+          blockPlace(place[0], place[1], place[2], held);
           send('place', { x: place[0], y: place[1], z: place[2], id: held });
           s.faceAimUntil = t + 0.8; s.armSwing = t; playSwing(sessionId);
         } else if (explicit) game.showToast("Can't build there");

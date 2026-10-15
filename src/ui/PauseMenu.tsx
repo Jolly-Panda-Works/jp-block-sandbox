@@ -16,7 +16,11 @@ const CONTROLS: [string, string][] = [
 ];
 
 export function PauseMenu() {
-  const { sensitivity, invertY, multiplayerId, showToast, name } = useGame();
+  const { sensitivity, invertY, multiplayerId, showToast, name, particles } = useGame();
+  const setParticles = (on: boolean) => {
+    useGame.setState({ particles: on });
+    try { localStorage.setItem('blocksy.particles', on ? 'on' : 'off'); } catch { /* private mode */ }
+  };
   const [newName, setNewName] = useState(name);
   const rename = () => {
     const clean = sanitizeName(newName);
@@ -47,6 +51,10 @@ export function PauseMenu() {
           <input value={newName} maxLength={MAX_NAME_LENGTH} dir="auto" onChange={(e) => setNewName(e.target.value)} />
           <button disabled={!newName.trim() || sanitizeName(newName) === name}>Save</button>
         </form>
+        <label className="setting">
+          <span>Particles</span>
+          <input type="checkbox" checked={particles} onChange={(e) => setParticles(e.target.checked)} />
+        </label>
         <div className="setting">
           <span>Mouse sensitivity</span>
           <button onClick={() => useGame.setState({ sensitivity: Math.max(0.2, +(sensitivity - 0.1).toFixed(1)) })}>−</button>

@@ -59,6 +59,8 @@ interface GameState {
   toast: { text: string; id: number } | null;
   nearbyStall: StallInfo | null;
   sensitivity: number;
+  /** Visual particles on/off (saved on this device). */
+  particles: boolean;
   invertY: boolean;
 
   setPanel: (p: Panel) => void;
@@ -121,6 +123,7 @@ export const useGame = create<GameState>()((set, get) => ({
   toast: null,
   nearbyStall: null,
   sensitivity: 1,
+  particles: (() => { try { return localStorage.getItem('blocksy.particles') !== 'off'; } catch { return true; } })(),
   invertY: false,
 
   setPanel: (panel) => set({ panel }),

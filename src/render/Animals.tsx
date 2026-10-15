@@ -6,6 +6,10 @@ import { isAnimalKind, variantColors, type AnimalColors, type AnimalKind } from 
 import { useGame } from '../state/store';
 import { animalStates } from '../net/network';
 import { now } from './animState';
+import { footstep } from './particles';
+import { localBody } from '../game/localState';
+
+const DUSTY = new Set(['cow', 'sheep', 'pig', 'llama', 'panda', 'dog', 'fox']);
 
 /**
  * Box: position, size, colour (hex, or a colour role of the variant: M main, A accent, D detail),
@@ -136,6 +140,7 @@ function Animal({ id, kind, variant }: { id: string; kind: AnimalKind; variant: 
   const legs = useRef<(THREE.Group | null)[]>([]);
   const wings = useRef<(THREE.Mesh | null)[]>([]);
   const phase = useRef(Math.random() * 6);
+  const step = useRef(0);
   const model = MODELS[kind];
   const pal = variantColors(kind, variant);
   const fly = kind === 'bee', hopper = kind === 'rabbit';
@@ -149,6 +154,10 @@ function Animal({ id, kind, variant }: { id: string; kind: AnimalKind; variant: 
     grp.position.set(a.rx, a.ry, a.rz);
     grp.rotation.y = a.ryaw;
     if (a.moving) phase.current += dt * (kind === 'cat' || kind === 'dog' || kind === 'fox' ? 14 : 8);
+    if (a.moving && DUSTY.has(kind) && Math.hypot(a.rx - localBody.x, a.rz - localBody.z) < 25) {
+      step.current += dt;
+      if (step.current > 0.55) { step.current = 0; footstep(a.rx, a.ry, a.rz, kind === 'cow' || kind === 'llama' || kind === 'panda' ? 1 : 0.5); }
+    }
     const swing = a.moving ? Math.sin(phase.current) * 0.55 : 0;
     legs.current.forEach((l, i) => { if (l) l.rotation.x = i % 2 === 0 ? swing : -swing; });
     const flap = fly ? Math.sin(t * 60) * 0.6 : Math.max(0, Math.sin(t * 18)) * 0.5 * (t - (a.hopAt ?? -9) < 0.8 ? 1 : 0);

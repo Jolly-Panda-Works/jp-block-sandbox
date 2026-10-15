@@ -181,6 +181,23 @@ The server owns the clock, so everyone has the same time. The HUD shows ☀️ /
 
 The settings are stored with the room on the backend and applied by the game server when the room starts, on top of the dashboard Custom settings.
 
+### Particles
+
+Small blocky particles, all client-side and cosmetic. They can be switched off in **Settings → Particles**, and phones get about 60% as many.
+
+| Event | Effect |
+|---|---|
+| Walking (players, bots, large animals) | Dust in the colour of the ground underfoot; more when sprinting |
+| Landing from a jump or fall | A dust ring that grows with the fall height |
+| Breaking a block | Falling chunks in the block's colour |
+| Placing a block | A small puff |
+| Emotes | 😄 sparkles + confetti, 😢 tears, 👋 notes; emoji give a small burst |
+| Mini-games | A poof when you sit down, sparkles for a won Rock Paper Scissors round, a confetti + sparkle celebration for the winner (others nearby see confetti over the table) |
+| Animals | Hearts when petted; notes when the rooster crows |
+| Shop | Gold coins when buying |
+| Water | Splashes when falling into the pond or the sea |
+| Night | Fireflies |
+
 ## Controls
 
 **Desktop:**

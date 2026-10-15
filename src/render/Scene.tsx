@@ -5,6 +5,7 @@ import { LocalPlayer } from '../game/LocalPlayer';
 import { BotSeats, GameCenterNpcs, LocalLabel, RemotePlayers, Shopkeepers } from './Characters';
 import { GameTables } from './GameTables';
 import { Animals } from './Animals';
+import { Particles } from './Particles';
 
 export function Scene() {
   const layout = useGame((s) => s.layout);
@@ -21,6 +22,7 @@ export function Scene() {
       <GameCenterNpcs layout={layout} />
       <BotSeats />
       <Animals />
+      <Particles />
     </>
   );
 }

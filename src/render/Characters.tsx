@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { AIR, createRng, hashString, isBotId, miniGameInfo, randomAppearance, type IslandLayout, type MgListing, type MiniGameKind } from '@jp/blocksy-shared';
 import { Avatar } from './Avatar';
 import { applyGamePose, getAnim, now, playEmote } from './animState';
+import { footstep, land } from './particles';
 import { remotes } from '../net/network';
 import { useGame, type PlayerMeta } from '../state/store';
 import { localBody } from '../game/localState';
@@ -38,6 +39,7 @@ function RemotePlayer({ id, meta }: { id: string; meta: PlayerMeta }) {
   const [held, setHeld] = useState(AIR);
   const [hammer, setHammer] = useState(false);
   const [invite, setInvite] = useState<MiniGameKind | ''>('');
+  const fxs = useRef({ grounded: true, airTime: 0, step: 0 });
   useFrame((_, dt) => {
     const r = remotes.get(id), g = group.current;
     if (!r || !g) return;
@@ -49,6 +51,17 @@ function RemotePlayer({ id, meta }: { id: string; meta: PlayerMeta }) {
     g.position.set(r.rx, r.ry, r.rz);
     g.rotation.set(0, r.ryaw, 0);
     anim.speed = r.speed; anim.grounded = r.grounded;
+    const f = fxs.current;
+    if (Math.hypot(r.rx - localBody.x, r.rz - localBody.z) < 30) {
+      if (!r.grounded) f.airTime += dt;
+      else if (!f.grounded && f.airTime > 0.45) land(r.rx, r.ry, r.rz, Math.min(1, (f.airTime - 0.45) * 1.2));
+      if (r.grounded) f.airTime = 0;
+      if (r.grounded && r.speed > 0.3) {
+        f.step += r.speed * 4.3 * dt;
+        if (f.step > (r.speed > 1.15 ? 0.75 : 1.1)) { f.step = 0; footstep(r.rx, r.ry, r.rz, r.speed > 1.15 ? 1.6 : 0.8); }
+      }
+    }
+    f.grounded = r.grounded;
     if (r.held !== held) setHeld(r.held);
     if ((r.tool === 'destroy') !== hammer) setHammer(r.tool === 'destroy');
     if ((r.inv ?? '') !== invite) setInvite(r.inv ?? '');

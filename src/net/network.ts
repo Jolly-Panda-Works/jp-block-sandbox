@@ -12,6 +12,8 @@ import { UUID_RE, config } from './config';
 import { getRealtimeCredentials } from './api';
 import { readGameToken, secondsLeft } from './jwt';
 import { lockPointer, openPanel, releasePointer } from '../game/pointer';
+import { localBody } from '../game/localState';
+import * as fx from '../render/particles';
 
 /** Latest replicated transform of a remote player; r* fields are the interpolated render values. */
 export interface RemoteState extends PlayerSnapshot {
@@ -31,6 +33,14 @@ export interface AnimalState { kind: string; variant: string; x: number; y: numb
 export const animalStates = new Map<string, AnimalState>();
 /** Server time of day; the client advances it smoothly between updates. */
 export const worldClock = { hour: 8, day: 1, dayLengthMs: 0, at: 0 };
+const gamePhases = new Map<string, string>();
+
+/** Where a player / bot is right now (for particle effects). */
+function posOf(id: string): { x: number; y: number; z: number; yaw: number } | null {
+  if (id && id === room?.sessionId) return { x: localBody.x, y: localBody.y, z: localBody.z, yaw: localBody.yaw };
+  const r = remotes.get(id);
+  return r ? { x: r.rx, y: r.ry, z: r.rz, yaw: r.ryaw } : null;
+}
 /** Current in-game hour (0–24) and day number. */
 export function currentClock(): { hour: number; day: number } {
   if (worldClock.dayLengthMs <= 0 || worldClock.at === 0) return { hour: worldClock.hour, day: worldClock.day };
@@ -250,6 +260,11 @@ function attach(r: Room): void {
     }
     if (animals.length !== get().animals.length) set({ animals: animals.map((a) => ({ id: a.id, kind: a.kind, variant: a.variant })) });
     const games = m.games ?? [];
+    for (const gm of games) {   // games finishing nearby (that I'm not part of): confetti over the table
+      if (gm.phase === 'over' && gamePhases.get(gm.id) !== 'over' && get().mg?.id !== gm.id && Math.hypot(gm.x - localBody.x, gm.z - localBody.z) < 40) fx.confetti(gm.x, gm.y + 1.4, gm.z, 40, 0.8);
+      gamePhases.set(gm.id, gm.phase);
+    }
+    if (gamePhases.size > 50) gamePhases.clear();
     if (JSON.stringify(games) !== JSON.stringify(get().games)) set({ games });
     if (delay !== get().acceptDelayMs) set({ acceptDelayMs: delay });
   });
@@ -264,25 +279,46 @@ function attach(r: Room): void {
     });
   });
 
-  r.onMessage('blockSet', (m: ServerMessages['blockSet']) => { world.grid?.set(m.x, m.y, m.z, m.id); });
+  r.onMessage('blockSet', (m: ServerMessages['blockSet']) => {
+    const old = world.grid?.get(m.x, m.y, m.z);
+    world.grid?.set(m.x, m.y, m.z, m.id);
+    // Someone else's edit (our own optimistic edit already changed the cell, so no double effect).
+    if (old !== undefined && old !== m.id) { if (m.id === AIR) fx.blockBreak(m.x, m.y, m.z, old); else fx.blockPlace(m.x, m.y, m.z, m.id); }
+  });
   r.onMessage('editRejected', (m: ServerMessages['editRejected']) => {
     world.grid?.set(m.x, m.y, m.z, m.id); // roll back the optimistic edit
     get().showToast(REJECT_TEXT[m.reason] ?? 'Not allowed');
   });
   r.onMessage('profile', (m: ServerMessages['profile']) => {
     set({ profile: m.profile });
-    if (m.result === 'purchased') get().showToast('Unlocked — it is yours forever');
+    if (m.result === 'purchased') { get().showToast('Unlocked — it is yours forever'); fx.coins(localBody.x, localBody.y + 0.8, localBody.z); }
   });
   r.onMessage('chat', (m: ServerMessages['chat']) => get().showBubble(m.sessionId, { text: m.text }));
   r.onMessage('emoji', (m: ServerMessages['emoji']) => {
     const e = EMOJIS.find((x) => x.id === m.id);
+    { const p = posOf(m.sessionId); if (p) fx.sparkle(p.x, p.y + 2.2, p.z, 8, ['#ffffff', '#ffe45c', '#ffb3c7'], 0.3); }
     if (e) get().showBubble(m.sessionId, { emoji: e.char }, 3.5);
   });
-  r.onMessage('emote', (m: ServerMessages['emote']) => playEmote(m.sessionId, m.id));
+  r.onMessage('emote', (m: ServerMessages['emote']) => {
+    playEmote(m.sessionId, m.id);
+    const p = posOf(m.sessionId);
+    if (!p) return;
+    if (m.id === 'happy') { fx.sparkle(p.x, p.y + 1.9, p.z, 16); fx.confetti(p.x, p.y + 2, p.z, 26, 0.6); }
+    else if (m.id === 'cry') fx.tears(p.x, p.y + 1.55, p.z, p.yaw);
+    else fx.notes(p.x - Math.cos(p.yaw) * 0.45, p.y + 2, p.z + Math.sin(p.yaw) * 0.45, '#ffe45c');
+  });
   r.onMessage('teleport', (m: ServerMessages['teleport'] & { yaw?: number }) => teleportLocal(m.x, m.y, m.z, m.yaw));
 
   // ---- mini-games ----
   r.onMessage('mg', (m: MgView) => {
+    const prev = get().mg;
+    if (!prev && m.role === 'player') fx.poof(localBody.x, localBody.y, localBody.z);
+    // Celebrations: confetti for the winners, sparkles for a won Rock Paper Scissors round.
+    if (m.phase === 'over' && prev?.phase !== 'over' && m.result) for (const w of m.result.winners) { const p = posOf(w); if (p) fx.victory(p.x, p.y, p.z); }
+    if (m.phase === 'reveal' && prev?.phase !== 'reveal' && m.rps && m.rps.roundWinner >= 0) {
+      const p = posOf(m.players[m.rps.roundWinner]?.id ?? '');
+      if (p) fx.sparkle(p.x, p.y + 1.8, p.z, 12);
+    }
     if (!get().mg) { releasePointer(); set({ tool: 'none', panel: 'none' }); }
     set({ mg: m, mgAt: performance.now() });
   });
@@ -303,6 +339,7 @@ function attach(r: Room): void {
   r.onMessage('animal', (m: { id: string; by: string; kind: string }) => {
     const a = animalStates.get(m.id);
     if (a) a.hopAt = performance.now() / 1000;
+    if (a) { if (m.by) fx.hearts(a.x, a.y + 0.9, a.z); else fx.notes(a.x, a.y + 0.8, a.z, '#ffb400'); }
     const kind = isAnimalKind(m.kind) ? m.kind : null;
     get().showBubble(m.id, { text: `❤️ ${kind ? ANIMAL_SOUND[kind] : ''}` }, 2.5);
   });
