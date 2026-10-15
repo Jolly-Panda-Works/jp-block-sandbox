@@ -3,18 +3,19 @@ import { voxelRaycast } from '@jp/blocksy-shared';
 /**
  * Third-person camera collision without jumps.
  * - A "thick" probe (centre + 4 parallel rays) acts like a small sphere, so block edges don't flicker.
- * - Anticipation: the probe also looks a little to the left and right of the view direction, so when you turn
- *   toward a wall the camera starts moving in a few degrees EARLIER and the change is spread over more frames
- *   instead of happening all at once.
+ * - Anticipation, only while turning: the probe also looks a little AHEAD in the direction you are turning
+ *   (further the faster you turn), so when you turn toward a wall the camera starts moving in a few degrees
+ *   earlier and the change is spread over more frames. Standing still or walking straight there is no
+ *   look-ahead, so things beside you (not behind you) never move the camera.
  * - Zooming in is smoothed and speed-limited; zooming out waits a moment and eases.
  * - Safety: the camera is never left inside a block (smallest step toward the player).
  */
 export type Vec3 = [number, number, number];
 export type SolidFn = (x: number, y: number, z: number) => boolean;
 
-export interface CameraRigState { dist: number; shoulder: number; clearAt: number; lastX: number; lastY: number; lastZ: number; init: boolean }
+export interface CameraRigState { dist: number; shoulder: number; clearAt: number; lastX: number; lastY: number; lastZ: number; init: boolean; lastYaw: number; yawRate: number }
 export const newCameraRig = (dist: number, shoulder: number): CameraRigState =>
-  ({ dist, shoulder, clearAt: -9, lastX: 0, lastY: 0, lastZ: 0, init: false });
+  ({ dist, shoulder, clearAt: -9, lastX: 0, lastY: 0, lastZ: 0, init: false, lastYaw: 0, yawRate: 0 });
 
 export interface CameraRigInput {
   /** Head pivot (behind which the camera orbits). */
@@ -37,7 +38,8 @@ export const CAM_TUNING = {
   maxInSpeed: 10,     // m/s
   easeOutRate: 2.2,   // 1/s
   easeOutDelay: 0.3,  // s
-  anticipate: 0.55,   // rad looked ahead on each side (≈ 31°)
+  anticipate: 0.55,   // rad — the most it looks ahead (≈ 31°)
+  lookAhead: 0.35,    // s — how far ahead in time it looks while turning
 };
 const SIDE_IN_RATE = 14, SIDE_OUT_RATE = 4;
 
@@ -66,6 +68,15 @@ function thickCast(origin: Vec3, dir: Vec3, max: number, r: number, solid: Solid
 export function solveCamera(s: CameraRigState, i: CameraRigInput): Vec3 {
   const [hx, hy, hz] = i.head;
   const teleported = !s.init || Math.hypot(hx - s.lastX, hy - s.lastY, hz - s.lastZ) > 4;
+  // How fast the view is turning (rad/s, smoothed), for the look-ahead.
+  const yaw = Math.atan2(i.dir[0], i.dir[2]);
+  if (s.init && i.dt > 0) {
+    const raw = Math.atan2(Math.sin(yaw - s.lastYaw), Math.cos(yaw - s.lastYaw)) / i.dt;
+    // Fast attack (a sudden fast turn looks ahead at once), slow release (no flicker from mouse jitter).
+    s.yawRate = Math.abs(raw) > Math.abs(s.yawRate) && Math.sign(raw) === Math.sign(s.yawRate || raw)
+      ? raw : s.yawRate + (raw - s.yawRate) * (1 - Math.exp(-10 * i.dt));
+  }
+  s.lastYaw = yaw;
   s.lastX = hx; s.lastY = hy; s.lastZ = hz; s.init = true;
 
   // Shoulder offset (camera slightly to the right), shrunk smoothly next to a wall.
@@ -78,11 +89,13 @@ export function solveCamera(s: CameraRigState, i: CameraRigInput): Vec3 {
   const back: Vec3 = [-i.dir[0], -i.dir[1], -i.dir[2]];
   const T = CAM_TUNING;
   let free = thickCast(pivot, back, i.maxDist + CAM_RADIUS, CAM_RADIUS, i.solid);
-  if (T.anticipate > 0) {
-    for (const a of [T.anticipate, -T.anticipate]) {
+  const ahead = Math.max(-T.anticipate, Math.min(T.anticipate, s.yawRate * T.lookAhead));
+  if (Math.abs(ahead) > 0.03) {
+    // Where the camera will be shortly if the turn continues (same rotation as the yaw).
+    for (const a of [ahead, ahead / 2]) {
       const c = Math.cos(a), sn = Math.sin(a);
-      const side: Vec3 = [back[0] * c - back[2] * sn, back[1], back[0] * sn + back[2] * c];
-      free = Math.min(free, thickCast(pivot, side, i.maxDist + CAM_RADIUS, CAM_RADIUS, i.solid));
+      const future: Vec3 = [back[0] * c + back[2] * sn, back[1], -back[0] * sn + back[2] * c];
+      free = Math.min(free, thickCast(pivot, future, i.maxDist + CAM_RADIUS, CAM_RADIUS, i.solid));
     }
   }
   const wanted = Math.max(MIN_DIST, Math.min(i.maxDist, free - CAM_RADIUS));

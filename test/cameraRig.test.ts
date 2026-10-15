@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newCameraRig, solveCamera, type SolidFn } from '../src/game/cameraRig';
+import { CAM_TUNING, newCameraRig, solveCamera, type SolidFn } from '../src/game/cameraRig';
 
 const dt = 1 / 60;
 const run = (rig: any, solid: SolidFn, frames: number, yawFn: (f: number) => number, t0 = 0) => {
@@ -75,15 +75,43 @@ test('turning near walls, corners and thin posts: no camera jumps at any turning
     (x, y, z) => x === 0 && z === -3 && y >= 0 && y <= 5,
     (x, y, z) => (x === -2 || z === -2) && y >= 0 && y <= 5,
   ];
-  for (const speed of [Math.PI / 3, (2 * Math.PI) / 3, 1.5 * Math.PI]) for (const solid of scenes) {
+  for (const speed of [Math.PI / 3, (2 * Math.PI) / 3, 1.5 * Math.PI, -(2 * Math.PI) / 3]) for (const solid of scenes) {
     const r = newCameraRig(4, 0.5);
-    let prev = -1;
+    let prev = -1, turned = 0;
     for (let f = 0; f < 480; f++) {
-      const yaw = f * dt * speed + Math.sin(f * 0.3) * 0.03;
+      turned += speed * Math.min(1, (f * dt) / 0.2) * dt;   // a real turn builds up over ~0.2 s
+      const yaw = turned + Math.sin(f * 0.3) * 0.03;
       const cam = solveCamera(r, { head: [0.5, 1.5, 0.5], dir: [Math.sin(yaw) * 0.94, -0.34, Math.cos(yaw) * 0.94], right: [-Math.cos(yaw), 0, Math.sin(yaw)], solid, maxDist: 4, shoulder: 0.5, dt, t: f * dt });
       if (prev >= 0) assert.ok(Math.abs(r.dist - prev) <= 0.2, `jump of ${Math.abs(r.dist - prev).toFixed(2)} m in one frame`);
       prev = r.dist;
       assert.ok(!solid(Math.floor(cam[0]), Math.floor(cam[1]), Math.floor(cam[2])), 'camera inside a block');
     }
   }
+});
+
+test('nothing behind the camera: things BESIDE the player never move it (standing still or walking)', () => {
+  const look = (r: ReturnType<typeof newCameraRig>, solid: SolidFn, head: (f: number) => [number, number, number]) => {
+    let min = 4;
+    for (let f = 0; f < 240; f++) {
+      const yaw = Math.sin(f * 0.3) * 0.01;   // hand resting on the mouse
+      solveCamera(r, { head: head(f), dir: [Math.sin(yaw) * 0.94, -0.34, Math.cos(yaw) * 0.94], right: [-Math.cos(yaw), 0, Math.sin(yaw)], solid, maxDist: 4, shoulder: 0.5, dt, t: f * dt });
+      if (f > 20) min = Math.min(min, r.dist);
+    }
+    return min;
+  };
+  // every single post around the player that is NOT on the line behind it
+  let checked = 0;
+  for (let px = -5; px <= 5; px++) for (let pz = -6; pz <= 1; pz++) {
+    const post: SolidFn = (x, y, z) => x === px && z === pz && y >= 0 && y <= 5;
+    const saved = CAM_TUNING.anticipate; CAM_TUNING.anticipate = 0;
+    const behind = look(newCameraRig(4, 0.5), post, () => [0.5, 1.5, 0.5]) < 3.99;
+    CAM_TUNING.anticipate = saved;
+    if (behind) continue;
+    checked++;
+    assert.ok(look(newCameraRig(4, 0.5), post, () => [0.5, 1.5, 0.5]) > 3.99, `a post at (${px}, ${pz}) beside the player moved the camera`);
+  }
+  assert.ok(checked > 50);
+  // walking past a row of trees on the side
+  const trees: SolidFn = (x, y, z) => x === 3 && z % 3 === 0 && y >= 0 && y <= 5;
+  assert.ok(look(newCameraRig(4, 0.5), trees, (f) => [0.5, 1.5, 0.5 + f * dt * 4.3]) > 3.99, 'walking past trees');
 });
