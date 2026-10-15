@@ -115,3 +115,18 @@ test('nothing behind the camera: things BESIDE the player never move it (standin
   const trees: SolidFn = (x, y, z) => x === 3 && z % 3 === 0 && y >= 0 && y <= 5;
   assert.ok(look(newCameraRig(4, 0.5), trees, (f) => [0.5, 1.5, 0.5 + f * dt * 4.3]) > 3.99, 'walking past trees');
 });
+
+test('looking up and down against the ground: no jumps, never inside the ground', () => {
+  const ground: SolidFn = (_x, y) => y <= 4;
+  for (const rate of [1, 2.5, 5]) {
+    const r = newCameraRig(4, 0.5);
+    let prev = -1;
+    for (let f = 0; f < 600; f++) {
+      const t = f * dt, pitch = -0.1 + Math.sin(t * rate) * 1.1, yaw = 0.3;
+      const cam = solveCamera(r, { head: [0.5, 6.62, 0.5], dir: [Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)], right: [-Math.cos(yaw), 0, Math.sin(yaw)], solid: ground, maxDist: 4, shoulder: 0.5, dt, t });
+      if (prev >= 0) assert.ok(Math.abs(r.dist - prev) <= 0.2, `jump of ${Math.abs(r.dist - prev).toFixed(2)} m at ${rate} rad/s`);
+      prev = r.dist;
+      assert.ok(!ground(Math.floor(cam[0]), Math.floor(cam[1]), Math.floor(cam[2])), 'inside the ground');
+    }
+  }
+});

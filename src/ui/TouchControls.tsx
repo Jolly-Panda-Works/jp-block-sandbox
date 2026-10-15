@@ -75,6 +75,20 @@ export function TouchControls() {
 
   const inMg = useGame((st) => !!st.mg || (!!st.lobby && st.lobby.hostId !== st.sessionId));
   if (inMg) return <LookArea />; // in a mini-game you can only look around
+  if (cameraMode === 'free') {
+    const hold = (k: 'flyUp' | 'flyDown', v: boolean) => () => { touch[k] = v; };
+    return (
+      <>
+        <LookArea />
+        <Joystick />
+        <div className="touch-buttons">
+          <button className="touch-btn small" onPointerDown={() => { touch.flyUp = touch.flyDown = false; useGame.setState({ cameraMode: 'first' }); }}>🎥<span>back</span></button>
+          <button className="touch-btn small" onPointerDown={hold('flyDown', true)} onPointerUp={hold('flyDown', false)} onPointerCancel={hold('flyDown', false)}>⬇<span>Down</span></button>
+          <button className="touch-btn jump" onPointerDown={hold('flyUp', true)} onPointerUp={hold('flyUp', false)} onPointerCancel={hold('flyUp', false)}>⬆<span>Up</span></button>
+        </div>
+      </>
+    );
+  }
   return (
     <>
       <LookArea />

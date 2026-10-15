@@ -3,8 +3,8 @@ import { voxelRaycast } from '@jp/blocksy-shared';
 /**
  * Third-person camera collision without jumps.
  * - A "thick" probe (centre + 4 parallel rays) acts like a small sphere, so block edges don't flicker.
- * - Anticipation, only while turning: the probe also looks a little AHEAD in the direction you are turning
- *   (further the faster you turn), so when you turn toward a wall the camera starts moving in a few degrees
+ * - Anticipation, only while turning (left/right AND up/down): the probe also looks a little AHEAD in the
+ *   direction you are turning (further the faster you turn), so when you turn toward a wall the camera starts moving in a few degrees
  *   earlier and the change is spread over more frames. Standing still or walking straight there is no
  *   look-ahead, so things beside you (not behind you) never move the camera.
  * - Zooming in is smoothed and speed-limited; zooming out waits a moment and eases.
@@ -13,9 +13,9 @@ import { voxelRaycast } from '@jp/blocksy-shared';
 export type Vec3 = [number, number, number];
 export type SolidFn = (x: number, y: number, z: number) => boolean;
 
-export interface CameraRigState { dist: number; shoulder: number; clearAt: number; lastX: number; lastY: number; lastZ: number; init: boolean; lastYaw: number; yawRate: number }
+export interface CameraRigState { dist: number; shoulder: number; clearAt: number; lastX: number; lastY: number; lastZ: number; init: boolean; lastYaw: number; yawRate: number; lastPitch: number; pitchRate: number }
 export const newCameraRig = (dist: number, shoulder: number): CameraRigState =>
-  ({ dist, shoulder, clearAt: -9, lastX: 0, lastY: 0, lastZ: 0, init: false, lastYaw: 0, yawRate: 0 });
+  ({ dist, shoulder, clearAt: -9, lastX: 0, lastY: 0, lastZ: 0, init: false, lastYaw: 0, yawRate: 0, lastPitch: 0, pitchRate: 0 });
 
 export interface CameraRigInput {
   /** Head pivot (behind which the camera orbits). */
@@ -68,15 +68,18 @@ function thickCast(origin: Vec3, dir: Vec3, max: number, r: number, solid: Solid
 export function solveCamera(s: CameraRigState, i: CameraRigInput): Vec3 {
   const [hx, hy, hz] = i.head;
   const teleported = !s.init || Math.hypot(hx - s.lastX, hy - s.lastY, hz - s.lastZ) > 4;
-  // How fast the view is turning (rad/s, smoothed), for the look-ahead.
+  // How fast the view is turning, left/right and up/down (rad/s), for the look-ahead.
   const yaw = Math.atan2(i.dir[0], i.dir[2]);
+  const pitch = Math.asin(Math.max(-1, Math.min(1, -i.dir[1])));
+  // Fast attack (a sudden fast turn looks ahead at once), slow release (no flicker from mouse jitter).
+  const follow = (cur: number, raw: number) =>
+    Math.abs(raw) > Math.abs(cur) && Math.sign(raw) === Math.sign(cur || raw) ? raw : cur + (raw - cur) * (1 - Math.exp(-10 * i.dt));
   if (s.init && i.dt > 0) {
-    const raw = Math.atan2(Math.sin(yaw - s.lastYaw), Math.cos(yaw - s.lastYaw)) / i.dt;
-    // Fast attack (a sudden fast turn looks ahead at once), slow release (no flicker from mouse jitter).
-    s.yawRate = Math.abs(raw) > Math.abs(s.yawRate) && Math.sign(raw) === Math.sign(s.yawRate || raw)
-      ? raw : s.yawRate + (raw - s.yawRate) * (1 - Math.exp(-10 * i.dt));
+    s.yawRate = follow(s.yawRate, Math.atan2(Math.sin(yaw - s.lastYaw), Math.cos(yaw - s.lastYaw)) / i.dt);
+    s.pitchRate = follow(s.pitchRate, (pitch - s.lastPitch) / i.dt);
   }
   s.lastYaw = yaw;
+  s.lastPitch = pitch;
   s.lastX = hx; s.lastY = hy; s.lastZ = hz; s.init = true;
 
   // Shoulder offset (camera slightly to the right), shrunk smoothly next to a wall.
@@ -89,12 +92,13 @@ export function solveCamera(s: CameraRigState, i: CameraRigInput): Vec3 {
   const back: Vec3 = [-i.dir[0], -i.dir[1], -i.dir[2]];
   const T = CAM_TUNING;
   let free = thickCast(pivot, back, i.maxDist + CAM_RADIUS, CAM_RADIUS, i.solid);
-  const ahead = Math.max(-T.anticipate, Math.min(T.anticipate, s.yawRate * T.lookAhead));
-  if (Math.abs(ahead) > 0.03) {
-    // Where the camera will be shortly if the turn continues (same rotation as the yaw).
-    for (const a of [ahead, ahead / 2]) {
-      const c = Math.cos(a), sn = Math.sin(a);
-      const future: Vec3 = [back[0] * c + back[2] * sn, back[1], -back[0] * sn + back[2] * c];
+  const aheadYaw = Math.max(-T.anticipate, Math.min(T.anticipate, s.yawRate * T.lookAhead));
+  const aheadPitch = Math.max(-T.anticipate, Math.min(T.anticipate, s.pitchRate * T.lookAhead));
+  if (Math.abs(aheadYaw) > 0.03 || Math.abs(aheadPitch) > 0.03) {
+    // Where the camera will be shortly if the turn continues.
+    for (const k of [1, 0.5]) {
+      const y2 = yaw + aheadYaw * k, p2 = Math.max(-1.5, Math.min(1.5, pitch + aheadPitch * k));
+      const future: Vec3 = [-Math.sin(y2) * Math.cos(p2), Math.sin(p2), -Math.cos(y2) * Math.cos(p2)];
       free = Math.min(free, thickCast(pivot, future, i.maxDist + CAM_RADIUS, CAM_RADIUS, i.solid));
     }
   }

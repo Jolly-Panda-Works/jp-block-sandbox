@@ -24,6 +24,11 @@ function onKey(code: string): void {
     return;
   }
   const inMg = !!s.mg || (!!s.lobby && s.lobby.hostId !== s.sessionId);
+  if (s.cameraMode === 'free' && !inMg) {
+    // Free camera is only for looking around: V goes back to first person; everything else is off.
+    if (code === 'KeyV') useGame.setState({ cameraMode: 'first' });
+    return;
+  }
   if (inMg) {
     // In a mini-game: RPS picks with 1/2/3; camera, social and style stay available; no building or shop.
     if (s.mg?.kind === 'rps' && /^(Digit|Numpad)[1-3]$/.test(code)) { send('mgMove', { move: RPS_CHOICES[Number(code.slice(-1)) - 1] }); return; }

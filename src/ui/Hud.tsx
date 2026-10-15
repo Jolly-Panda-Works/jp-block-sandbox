@@ -50,7 +50,7 @@ export function Hud() {
   const count = Object.keys(s.players).filter((id) => !isBotId(id)).length; // people only, not bots
   const playing = s.panel === 'none';
   return (
-    <div className="hud">
+    <div className={`hud ${playing && s.cameraMode === 'free' && !s.mg ? 'free-cam' : ''}`}>
       {(s.mg || (s.lobby && s.lobby.hostId !== s.sessionId)) && !s.touch && <LookArea />}
       {playing && <WorldTime />}
       {s.touch && playing && <TouchControls />}
@@ -120,7 +120,7 @@ export function Hud() {
       )}
       {!s.touch && <div className="card mode"><Keycap k="V" /> {s.cameraMode === 'first' ? 'First person' : s.cameraMode === 'third' ? 'Third person' : 'Free camera'}</div>}
       {playing && s.cameraMode === 'free' && !s.mg && (
-        <div className="card free-cam-hint">🎥 Free camera — {s.touch ? 'joystick to fly, drag to look' : 'WASD fly · Space up · Shift down · V to go back'}</div>
+        <div className="card free-cam-hint">🎥 Free camera — {s.touch ? 'joystick to fly · ⬆⬇ up/down · drag to look · 🎥 to go back' : 'WASD fly · Space up · Shift down · mouse to look · V to go back · Esc menu'}</div>
       )}
       {s.tool === 'none' && playing && !s.touch && (
         <div className="card hands">✋ Hands empty — <Keycap k="1–9" /> build · <Keycap k="0" /> destroy · <Keycap k="T" /> choose blocks</div>

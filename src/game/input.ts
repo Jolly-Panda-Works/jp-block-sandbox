@@ -10,7 +10,7 @@ const mousePressed = [false, false, false];
 let keyboardEnabled = true;
 
 /** Touch-control state written by <TouchControls> and merged into each frame's input. */
-export const touch = { moveX: 0, moveY: 0, lookDX: 0, lookDY: 0, jump: false, usePressed: false, useHeld: false };
+export const touch = { moveX: 0, moveY: 0, lookDX: 0, lookDY: 0, jump: false, usePressed: false, useHeld: false, flyUp: false, flyDown: false };
 
 /** In touch mode the keyboard is ignored entirely (text fields keep working). */
 export function setKeyboardEnabled(enabled: boolean): void {
@@ -82,7 +82,7 @@ export function consumeInput(): FrameInput {
     moveY: clamp1((k('KeyW') ? 1 : 0) - (k('KeyS') ? 1 : 0) + touch.moveY),
     jump: pressed.has('Space') || touch.jump,
     sprint: k('ShiftLeft') || k('ShiftRight'),
-    up: k('Space'), down: k('ShiftLeft') || k('ShiftRight'),
+    up: k('Space') || touch.flyUp, down: k('ShiftLeft') || k('ShiftRight') || touch.flyDown,
     lookX: mouseDX + touch.lookDX, lookY: mouseDY + touch.lookDY, wheel,
     primaryPressed: mousePressed[0] || touch.usePressed, primaryHeld: mouseHeld[0] || touch.useHeld,
     secondaryPressed: mousePressed[2], secondaryHeld: mouseHeld[2],

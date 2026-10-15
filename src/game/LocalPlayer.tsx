@@ -102,7 +102,7 @@ export function LocalPlayer() {
     if (canLook) {
       b.yaw -= inp.lookX * LOOK_SPEED * game.sensitivity;
       b.pitch += inp.lookY * LOOK_SPEED * game.sensitivity * (game.invertY ? -1 : 1);
-      if (inp.wheel && game.tool !== 'none' && !inMg) game.cycleSlot(inp.wheel);
+      if (inp.wheel && game.tool !== 'none' && !inMg && !freeCam) game.cycleSlot(inp.wheel);
     }
     // Entering a mini-game: aim at the table / opponent once, and use third person for board games.
     if (game.mg && game.mg.id !== s.framedFor) {
