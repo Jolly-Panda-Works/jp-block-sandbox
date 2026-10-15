@@ -268,8 +268,10 @@ export function LocalPlayer() {
     }
 
     // ---- shops, networking ----
+    // Not gated on canAct: with the shop open the player can't act, but is still at the stall
+    // (the shop closes itself when nearbyStall goes away).
     let nearby: StallInfo | null = null;
-    if (game.layout && canAct) {
+    if (game.layout && !inMg) {
       let best = STALL_RADIUS * STALL_RADIUS;
       for (const st2 of game.layout.stalls) {
         const d = (st2.interact.x - b.x) ** 2 + (st2.interact.z - b.z) ** 2 + ((st2.interact.y - b.y) ** 2) * 0.25;

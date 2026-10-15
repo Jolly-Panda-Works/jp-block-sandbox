@@ -13,7 +13,7 @@ import { send } from './net/network';
 import { RPS_CHOICES } from '@jp/blocksy-shared';
 import { PauseMenu } from './ui/PauseMenu';
 import { clearHeld, installInput, setKeyboardEnabled } from './game/input';
-import { lockPointer, openPanel, takeSuppressPause, togglePanel } from './game/pointer';
+import { lockPointer, takeSuppressPause, togglePanel } from './game/pointer';
 import { useGame } from './state/store';
 
 function onKey(code: string): void {
@@ -40,8 +40,7 @@ function onKey(code: string): void {
   if (s.panel !== 'none') return;
   if (code === 'KeyH') useGame.setState({ showHints: !s.showHints });
   else if (code === 'KeyV') useGame.setState({ cameraMode: s.cameraMode === 'first' ? 'third' : 'first' });
-  else if (code === 'KeyE' && interactMiniGame()) { /* accept invite / watch game */ }
-  else if (code === 'KeyE' && s.nearbyStall) { useGame.setState({ shopTab: s.nearbyStall.category }); openPanel('shop'); }
+  else if (code === 'KeyE') interactMiniGame(); // invite → NPC → shop stall → watch game → pet animal
   else if (code === 'Digit0' || code === 'Numpad0') s.selectTool('destroy');
   else if (/^(Digit|Numpad)[1-9]$/.test(code)) s.selectTool(Number(code.slice(-1)) - 1);
   else if (code === 'KeyQ' && s.tool !== 'none') s.setTool('none'); // put away

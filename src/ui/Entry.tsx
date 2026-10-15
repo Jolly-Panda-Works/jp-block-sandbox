@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   ANIMAL_ICON, ANIMAL_KINDS, DEFAULT_ROOM_SETTINGS, GAME_NAME, ISLAND_NAME, MAX_NAME_LENGTH, sanitizeName,
   type AnimalKind, type RoomSettings,
 } from '@jp/blocksy-shared';
 import { asset } from '../assets';
 import { connect } from '../net/network';
-import { UUID_RE, config, inviteLink, parseMatchInput, parsePastedToken } from '../net/config';
+import { UUID_RE, config, gamePageUrl, inviteLink, parseMatchInput, parsePastedToken } from '../net/config';
+import { tokenBookmarklet } from '../net/bookmarklet';
 import { ApiError, MAX_ROOM_PLAYERS, isFull, platform, type RoomInfo } from '../net/platform';
 import { saveName, useGame } from '../state/store';
 import { lockLandscape } from '../game/orientation';
@@ -29,9 +30,9 @@ export function Entry() {
   // Guest session: reuse the stored token, or create a guest account silently.
   useEffect(() => {
     if (step !== 'checking') return;
-    const name = useGame.getState().name;
-    (platform.hasSession() ? platform.me().catch(() => null) : Promise.resolve(null))
-      .then((u) => u ?? platform.signInGuest(name))
+    // Guest sign-in is idempotent (the same device is always the same player), so there is no need to
+    // probe an old, possibly expired session first (that probe showed up as a 401 in the console).
+    platform.signInGuest(useGame.getState().name)
       .then(() => setStep('lobby'))
       .catch((err) => { setError(err instanceof Error ? err.message : 'Could not reach the game backend.'); setStep('lobby'); });
   }, [step]);
@@ -124,10 +125,24 @@ function TestToken() {
     lockLandscape();
     void connect(sanitizeName(name), { jwt: t.jwt, multiplayerId: t.multiplayerId || undefined, wsUrl: t.wsUrl || undefined });
   };
+  // The bookmark's href is a javascript: URL; set it on the element directly (React warns about such hrefs).
+  const bookmark = useRef<HTMLAnchorElement>(null);
+  useEffect(() => { bookmark.current?.setAttribute('href', tokenBookmarklet(config.roomName, gamePageUrl())); }, []);
   return (
     <form className="entry-form" onSubmit={join}>
       <PlayingAs />
-      <p>Test mode: join with a token from the Rastaar dashboard playground.</p>
+      <div className="bookmark-box">
+        <b>One-click test login</b>
+        <ol className="steps">
+          <li>Drag this button to your bookmarks bar (show it with Ctrl+Shift+B / ⌘⇧B):
+            <a ref={bookmark} className="bookmarklet" onClick={(e) => { e.preventDefault(); setError('Drag the button to your bookmarks bar, then click it in the Rastaar dashboard tab.'); }}>🎮 Play {config.roomName}</a>
+          </li>
+          <li>Open <a href="https://gameserver.rastar.ir/dashboard" target="_blank" rel="noreferrer">the dashboard</a> and sign in.</li>
+          <li>Click the bookmark there: the game opens in a new tab with a fresh token. Every player does this in their own browser.</li>
+        </ol>
+      </div>
+      <details>
+      <summary className="muted">Or paste a token by hand</summary>
       <ol className="steps">
         <li>Open <a href="https://gameserver.rastar.ir/dashboard" target="_blank" rel="noreferrer">the dashboard</a> in another tab and sign in.</li>
         <li>In <b>that tab</b>, press F12 → Console (context: <code>top</code>), paste the snippet and press Enter.</li>
@@ -140,6 +155,7 @@ function TestToken() {
       <textarea value={pasted} onChange={(e) => { setPasted(e.target.value); setError(''); }} rows={3} dir="ltr" spellCheck={false}
         placeholder='Paste the token here ({"jwt": …} or eyJ…)' />
       <button className="primary" disabled={phase === 'connecting' || !pasted.trim()}>{phase === 'connecting' ? 'Joining…' : 'Join'}</button>
+      </details>
       {error && <div className="error">{error}</div>}
       <ErrorLine />
     </form>

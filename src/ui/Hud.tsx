@@ -4,14 +4,17 @@ import { AIR, HOTBAR_SLOTS, ISLAND_NAME, MAX_PLAYERS, getBlock } from '@jp/block
 import { useGame } from '../state/store';
 import { getIconUrl } from '../render/textures';
 import { now } from '../render/animState';
-import { lockPointer, togglePanel } from '../game/pointer';
+import { lockPointer, togglePanel, openPanel } from '../game/pointer';
 import { LookArea, TouchControls } from './TouchControls';
 import { MiniGameOverlay } from './MiniGameOverlay';
 import { send } from '../net/network';
 import { ANIMAL_ICON, formatClock, isAnimalKind, isBotId, isNight, miniGameInfo } from '@jp/blocksy-shared';
 import { currentClock } from '../net/network';
 
-/** E near an invite → accept (after the delay); near a running game → watch. Returns true if handled. */
+/**
+ * Interact (E / tap): invite → Game Center character → shop stall → watch a game → pet an animal.
+ * The prompts on screen follow the same order. Returns true if something was done.
+ */
 export function interactMiniGame(): boolean {
   const s = useGame.getState();
   if (s.mg || s.lobby) return true;
@@ -21,6 +24,7 @@ export function interactMiniGame(): boolean {
     return true;
   }
   if (s.nearNpc) { send('mgNpc', { npcId: s.nearNpc.id }); return true; }
+  if (s.nearbyStall) { useGame.setState({ shopTab: s.nearbyStall.category }); openPanel('shop'); return true; }
   if (s.nearGame) { send('mgSpectate', { gameId: s.nearGame.id }); return true; }
   if (s.nearAnimal) { send('pet', { animalId: s.nearAnimal.id }); return true; }
   return false;
@@ -87,17 +91,17 @@ export function Hud() {
           <Keycap k="E" /> {miniGameInfo(s.nearNpc.kind).icon} Play {miniGameInfo(s.nearNpc.kind).name} with 🤖 {s.nearNpc.name}
         </button>
       )}
-      {playing && !s.mg && !s.nearInvite && !s.nearNpc && s.nearGame && (
+      {playing && !s.mg && !s.nearInvite && !s.nearNpc && !s.nearbyStall && s.nearGame && (
         <button className="card prompt mg-prompt" onClick={() => interactMiniGame()}>
           <Keycap k="E" /> 👁 Watch {miniGameInfo(s.nearGame.kind).name}
         </button>
       )}
-      {playing && !s.mg && !s.nearInvite && !s.nearNpc && !s.nearGame && s.nearAnimal && (
+      {playing && !s.mg && !s.nearInvite && !s.nearNpc && !s.nearbyStall && !s.nearGame && s.nearAnimal && (
         <button className="card prompt mg-prompt" onClick={() => interactMiniGame()}>
           <Keycap k="E" /> {isAnimalKind(s.nearAnimal.kind) ? ANIMAL_ICON[s.nearAnimal.kind] : ''} Pet the {s.nearAnimal.kind}
         </button>
       )}
-      {s.nearbyStall && playing && !s.touch && !s.nearInvite && !s.nearGame && !s.nearNpc && !s.nearAnimal && <div className="card prompt"><Keycap k="E" /> Open {s.nearbyStall.title} shop</div>}
+      {s.nearbyStall && playing && !s.mg && !s.touch && !s.nearInvite && !s.nearNpc && <div className="card prompt"><Keycap k="E" /> Open {s.nearbyStall.title} shop</div>}
       <SelfBubble />
       <Toast />
       {s.showHints && !s.touch && (
