@@ -2,15 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { AIR, createRng, randomAppearance, type IslandLayout } from '@jp/blocksy-shared';
+import { AIR, createRng, miniGameInfo, randomAppearance, type IslandLayout, type MiniGameKind } from '@jp/blocksy-shared';
 import { Avatar } from './Avatar';
-import { getAnim, now, playEmote } from './animState';
+import { applyGamePose, getAnim, now, playEmote } from './animState';
 import { remotes } from '../net/network';
 import { useGame, type PlayerMeta } from '../state/store';
 import { localBody } from '../game/localState';
 
 /** Name tag plus speech/emoji bubble above a character (reference images 5, 9, 10). */
-export function Label({ id, name, isYou }: { id: string; name: string; isYou?: boolean }) {
+export function Label({ id, name, isYou, invite }: { id: string; name: string; isYou?: boolean; invite?: MiniGameKind | '' }) {
   const bubble = useGame((s) => s.bubbles[id]);
   const [, force] = useState(0);
   useEffect(() => {
@@ -25,6 +25,7 @@ export function Label({ id, name, isYou }: { id: string; name: string; isYou?: b
     <Html position={[0, 2.15, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
       <div className="label">
         {visible && <div className={`bubble ${bubble?.emoji ? 'emoji' : ''}`}>{bubble?.emoji ?? bubble?.text}</div>}
+        {invite && <div className="invite-badge" title={miniGameInfo(invite).name}>{miniGameInfo(invite).icon}<span>{miniGameInfo(invite).name}</span></div>}
         <div className={`nametag ${isYou ? 'you' : ''}`}><span className="dot" />{name}</div>
       </div>
     </Html>
@@ -36,6 +37,7 @@ function RemotePlayer({ id, meta }: { id: string; meta: PlayerMeta }) {
   const anim = getAnim(id);
   const [held, setHeld] = useState(AIR);
   const [hammer, setHammer] = useState(false);
+  const [invite, setInvite] = useState<MiniGameKind | ''>('');
   useFrame((_, dt) => {
     const r = remotes.get(id), g = group.current;
     if (!r || !g) return;
@@ -49,11 +51,13 @@ function RemotePlayer({ id, meta }: { id: string; meta: PlayerMeta }) {
     anim.speed = r.speed; anim.grounded = r.grounded;
     if (r.held !== held) setHeld(r.held);
     if ((r.tool === 'destroy') !== hammer) setHammer(r.tool === 'destroy');
+    if ((r.inv ?? '') !== invite) setInvite(r.inv ?? '');
+    applyGamePose(id, anim, useGame.getState().games);
   });
   return (
     <group ref={group}>
       <Avatar appearance={meta.appearance} anim={anim} heldBlock={held} hammer={hammer} />
-      <Label id={id} name={meta.name} />
+      <Label id={id} name={meta.name} invite={invite} />
     </group>
   );
 }
@@ -68,8 +72,9 @@ export function LocalLabel() {
   const group = useRef<THREE.Group>(null);
   const id = useGame((s) => s.sessionId) ?? 'local';
   const mode = useGame((s) => s.cameraMode);
+  const invite = useGame((s) => s.myInvite);
   useFrame(() => group.current?.position.set(localBody.x, localBody.y, localBody.z));
-  return <group ref={group}>{mode === 'third' && <Label id={id} name="You" isYou />}</group>;
+  return <group ref={group}>{mode === 'third' && <Label id={id} name="You" isYou invite={invite} />}</group>;
 }
 
 const KEEPER_LINES = ['Welcome!', 'Everything is free today!', 'Fresh blocks!', 'Hi!'];

@@ -3,6 +3,7 @@ import { Environment } from './Environment';
 import { WorldMesh } from './WorldMesh';
 import { LocalPlayer } from '../game/LocalPlayer';
 import { LocalLabel, RemotePlayers, Shopkeepers } from './Characters';
+import { GameTables } from './GameTables';
 
 export function Scene() {
   const layout = useGame((s) => s.layout);
@@ -15,6 +16,7 @@ export function Scene() {
       <LocalLabel />
       <RemotePlayers />
       <Shopkeepers layout={layout} />
+      <GameTables />
     </>
   );
 }

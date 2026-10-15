@@ -6,7 +6,7 @@
  */
 import { config } from './config';
 
-const env = import.meta.env as Record<string, string | undefined>;
+const env = (import.meta.env ?? {}) as Record<string, string | undefined>;
 const GAME = env.VITE_ROOM_NAME || 'blocksy';
 const paths = {
   otpSend: env.VITE_AUTH_OTP_SEND_PATH || '/api/v1/auth/otp/send',

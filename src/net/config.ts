@@ -4,7 +4,7 @@
  *   ?jwt=…&multiplayerId=…&username=…&avatarUrl=…
  * Secrets (jwt, token) are removed from the address bar right after they are read.
  */
-const env = import.meta.env as Record<string, string | undefined>;
+const env = (import.meta.env ?? {}) as Record<string, string | undefined>;
 const query = new URLSearchParams(location.search);
 const trimSlash = (s: string) => s.replace(/\/+$/, '');
 
@@ -53,6 +53,41 @@ export function parseMatchInput(raw: string): { multiplayerId: string; jwt: stri
     const m = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(text);
     return { multiplayerId: m ? m[0] : text, jwt: '' };
   }
+}
+
+/**
+ * Reads a pasted test token: the JSON copied by the dashboard's playground snippet
+ * (e.g. { "jwt", "multiplayerId", "wsUrl", … }, possibly inside { data }), a bare JWT, or a game link with ?jwt=….
+ */
+export function parsePastedToken(raw: string): { jwt: string; multiplayerId: string; wsUrl: string; error: string } {
+  const text = raw.trim();
+  const out = { jwt: '', multiplayerId: '', wsUrl: '', error: '' };
+  if (!text) return out;
+  if (text.startsWith('{')) {
+    try {
+      const body = JSON.parse(text) as Record<string, unknown>;
+      const o = (body.data && typeof body.data === 'object' ? body.data : body) as Record<string, unknown>;
+      const s = (v: unknown) => (typeof v === 'string' ? v : '');
+      out.jwt = s(o.jwt) || s(o.token) || s(o.accessToken);
+      out.multiplayerId = s(o.multiplayerId) || s(o.mid) || s(o.matchId);
+      out.wsUrl = s(o.wsUrl);
+      if (!out.jwt) out.error = s(o.message) || s(o.error) || 'The pasted JSON has no token in it. Run the snippet again in the dashboard tab.';
+    } catch {
+      out.error = 'That text is not valid JSON. Copy the snippet result again.';
+    }
+    return out;
+  }
+  if (/^https?:\/\//i.test(text)) {
+    try {
+      const u = new URL(text);
+      out.jwt = u.searchParams.get('jwt') ?? '';
+      out.multiplayerId = u.searchParams.get('room') ?? u.searchParams.get('multiplayerId') ?? '';
+    } catch { /* fall through */ }
+    if (!out.jwt) out.error = 'That link has no token in it.';
+    return out;
+  }
+  out.jwt = text;
+  return out;
 }
 
 /** Shareable link to this match. Never contains a jwt or token. */

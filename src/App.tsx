@@ -7,6 +7,10 @@ import { ShopPanel } from './ui/ShopPanel';
 import { CustomizePanel } from './ui/CustomizePanel';
 import { SocialPanel } from './ui/SocialPanel';
 import { BuildPanel } from './ui/BuildPanel';
+import { GamesPanel } from './ui/GamesPanel';
+import { interactMiniGame } from './ui/Hud';
+import { send } from './net/network';
+import { RPS_CHOICES } from '@jp/blocksy-shared';
 import { PauseMenu } from './ui/PauseMenu';
 import { clearHeld, installInput, setKeyboardEnabled } from './game/input';
 import { lockPointer, openPanel, takeSuppressPause, togglePanel } from './game/pointer';
@@ -19,6 +23,17 @@ function onKey(code: string): void {
     if (s.panel !== 'none') s.setPanel('none'); // browsers don't allow re-locking from Escape; the overlay asks for a click
     return;
   }
+  const inMg = !!s.mg || (!!s.lobby && s.lobby.hostId !== s.sessionId);
+  if (inMg) {
+    // In a mini-game: RPS picks with 1/2/3; camera, social and style stay available; no building or shop.
+    if (s.mg?.kind === 'rps' && /^(Digit|Numpad)[1-3]$/.test(code)) { send('mgMove', { move: RPS_CHOICES[Number(code.slice(-1)) - 1] }); return; }
+    if (code === 'KeyV') { useGame.setState({ cameraMode: s.cameraMode === 'first' ? 'third' : 'first' }); return; }
+    if (code === 'KeyG') return togglePanel('social');
+    if (code === 'KeyC') return togglePanel('customize');
+    if (code === 'KeyB' || code === 'KeyT' || code === 'KeyP') s.showToast('Not available while in a mini-game');
+    return;
+  }
+  if (code === 'KeyP') return togglePanel('games');
   if (code === 'KeyB') return togglePanel('shop');
   if (code === 'KeyC') return togglePanel('customize');
   if (code === 'KeyT') return togglePanel('build');
@@ -26,6 +41,7 @@ function onKey(code: string): void {
   if (s.panel !== 'none') return;
   if (code === 'KeyH') useGame.setState({ showHints: !s.showHints });
   else if (code === 'KeyV') useGame.setState({ cameraMode: s.cameraMode === 'first' ? 'third' : 'first' });
+  else if (code === 'KeyE' && interactMiniGame()) { /* accept invite / watch game */ }
   else if (code === 'KeyE' && s.nearbyStall) { useGame.setState({ shopTab: s.nearbyStall.category }); openPanel('shop'); }
   else if (code === 'Digit0' || code === 'Numpad0') s.selectTool('destroy');
   else if (/^(Digit|Numpad)[1-9]$/.test(code)) s.selectTool(Number(code.slice(-1)) - 1);
@@ -83,6 +99,7 @@ export function App() {
       {panel === 'customize' && <CustomizePanel />}
       {panel === 'social' && <SocialPanel />}
       {panel === 'build' && <BuildPanel />}
+      {panel === 'games' && <GamesPanel />}
       {panel === 'pause' && <PauseMenu />}
     </div>
   );

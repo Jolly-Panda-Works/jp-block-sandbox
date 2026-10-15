@@ -2,5 +2,11 @@
   "worldSeed": 1337,
   "sessionMinutes": 0,
   "editsPerSecond": 12,
-  "chatEnabled": true
+  "chatEnabled": true,
+  "inviteAcceptDelaySec": 5,
+  "rpsPickSec": 3,
+  "rpsBestOf": 3,
+  "tttTurnSec": 15,
+  "chessTurnSec": 60,
+  "ludoTurnSec": 10
 }

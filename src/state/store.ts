@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import {
   AIR, HOTBAR_SLOTS, assignSlot, createProfile, DEFAULT_APPEARANCE,
-  type Appearance, type ToolKind, type IslandLayout, type ProfileData, type ShopCategory, type StallInfo,
+  type Appearance, type ToolKind, type MgLobby, type MgListing, type MgView, type MiniGameKind, type IslandLayout, type ProfileData, type ShopCategory, type StallInfo,
 } from '@jp/blocksy-shared';
 
-export type Panel = 'none' | 'pause' | 'shop' | 'customize' | 'social' | 'build';
+export type Panel = 'none' | 'pause' | 'shop' | 'customize' | 'social' | 'build' | 'games';
 export type CameraMode = 'first' | 'third';
 
 export interface PlayerMeta { name: string; appearance: Appearance; isLocal: boolean }
@@ -23,6 +23,19 @@ interface GameState {
   timeLeftMs: number;
   sessionEnded: boolean;
   reconnecting: boolean;
+  /** Mini-game I'm playing or watching (server view), and when it was received (performance.now ms). */
+  mg: MgView | null;
+  mgAt: number;
+  /** Ludo lobby I'm in (host or guest). */
+  lobby: MgLobby | null;
+  /** My own open invite (shown above my head). */
+  myInvite: MiniGameKind | '';
+  /** Running games on the island (tables, poses, spectating). */
+  games: MgListing[];
+  acceptDelayMs: number;
+  /** Closest invite / game in reach (set by the local player controller). */
+  nearInvite: { hostId: string; name: string; kind: MiniGameKind; waitMs: number } | null;
+  nearGame: { id: string; kind: MiniGameKind } | null;
   layout: IslandLayout | null;
   profile: ProfileData;
   selectedSlot: number;
@@ -70,6 +83,14 @@ export const useGame = create<GameState>()((set, get) => ({
   timeLeftMs: 0,
   sessionEnded: false,
   reconnecting: false,
+  mg: null,
+  mgAt: 0,
+  lobby: null,
+  myInvite: '',
+  games: [],
+  acceptDelayMs: 5000,
+  nearInvite: null,
+  nearGame: null,
   layout: null,
   profile: createProfile(),
   selectedSlot: 0,

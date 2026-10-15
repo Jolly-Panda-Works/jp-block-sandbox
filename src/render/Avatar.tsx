@@ -52,6 +52,7 @@ export function Avatar({ appearance, anim, heldBlock = AIR, hammer = false }: Pr
   const legL = useRef<THREE.Group>(null), legR = useRef<THREE.Group>(null), head = useRef<THREE.Group>(null);
   const armL = useRef<THREE.Group>(null), armR = useRef<THREE.Group>(null);
   const st = useRef({ phase: 0, speed: 0 });
+  const rock = useRef<THREE.Group>(null), paper = useRef<THREE.Group>(null), scissors = useRef<THREE.Group>(null);
   const heldGeo = heldBlock !== AIR ? getBlockGeometry(heldBlock) : null;
 
   useFrame((_, rawDt) => {
@@ -81,6 +82,17 @@ export function Avatar({ appearance, anim, heldBlock = AIR, hammer = false }: Pr
         aRx = 0; aRz = -2.62 + Math.sin(e * 9) * 0.38; hZ = 0.09;
         break;
     }
+    if (anim.pose === 'seated') {
+      // Sitting on a stool at the table, hands on the board.
+      y = -0.27; lL = lR = -1.45; aLx = aRx = -0.95; aLz = 0.08; aRz = -0.08; hX = 0.25;
+    } else if (anim.pose === 'rps') {
+      if (anim.handItem) { aRx = -1.35; aRz = 0; }                       // shows the chosen item
+      else { aRx = -0.5 - Math.abs(Math.sin(t * 9)) * 0.9; aRz = -0.05; } // "rock… paper… scissors…" pump
+      aLx = -0.2; lL = 0.1; lR = -0.1;
+    }
+    if (rock.current) rock.current.visible = anim.handItem === 'rock';
+    if (paper.current) paper.current.visible = anim.handItem === 'paper';
+    if (scissors.current) scissors.current.visible = anim.handItem === 'scissors';
     const sw = (t - anim.swingStart) / 0.28;
     if (sw >= 0 && sw < 1) { aRx = -0.21 - Math.sin(sw * Math.PI) * 1.4; aRz = -0.1; }
 
@@ -103,6 +115,15 @@ export function Avatar({ appearance, anim, heldBlock = AIR, hammer = false }: Pr
           <group ref={armL} position={JOINTS.armL}>{by('armL')}</group>
           <group ref={armR} position={JOINTS.armR}>
             {by('armR')}
+            <group position={HAND_ANCHOR} scale={1 / MODEL_SCALE}>
+              <group ref={rock} visible={false}><mesh scale={[0.2, 0.17, 0.2]} castShadow><boxGeometry /><meshLambertMaterial color="#8d8f94" /></mesh></group>
+              <group ref={paper} visible={false}><mesh position={[0, -0.02, 0.06]} scale={[0.24, 0.02, 0.3]} castShadow><boxGeometry /><meshLambertMaterial color="#f4f1e8" /></mesh></group>
+              <group ref={scissors} visible={false}>
+                <mesh rotation={[0, 0.45, 0]} position={[0, 0, 0.1]} scale={[0.03, 0.03, 0.32]}><boxGeometry /><meshLambertMaterial color="#c9ced6" /></mesh>
+                <mesh rotation={[0, -0.45, 0]} position={[0, 0, 0.1]} scale={[0.03, 0.03, 0.32]}><boxGeometry /><meshLambertMaterial color="#c9ced6" /></mesh>
+                <mesh position={[0, 0, -0.04]} scale={[0.12, 0.04, 0.06]}><boxGeometry /><meshLambertMaterial color="#e2494b" /></mesh>
+              </group>
+            </group>
             {hammer && (
               <group position={HAND_ANCHOR} rotation={[Math.PI / 2, 0, 0]} scale={1 / MODEL_SCALE}><Hammer /></group>
             )}

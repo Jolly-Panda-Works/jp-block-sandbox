@@ -3,6 +3,7 @@ import type { ProfileData, PurchaseResult, ToolKind } from './economy';
 import type { IslandLayout } from './island';
 import type { EmojiId, EmoteId } from './social';
 import type { PlacementResult, RemovalResult } from './placement';
+import type { MiniGameKind, MiniGameMove } from './minigames';
 
 /**
  * Options for `client.joinOrCreate(ROOM_NAME, options)`.
@@ -42,6 +43,13 @@ export interface ClientMessages {
   chat: { text: string };
   emoji: { id: EmojiId };
   emote: { id: EmoteId };
+  mgInvite: { kind: MiniGameKind };
+  mgCancel: Record<string, never>;
+  mgAccept: { hostId: string };
+  mgStart: Record<string, never>;
+  mgMove: { move: MiniGameMove };
+  mgLeave: Record<string, never>;
+  mgSpectate: { gameId: string };
 }
 
 /** Server → client messages. */

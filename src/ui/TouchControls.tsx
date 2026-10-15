@@ -9,7 +9,7 @@ const JOY_RADIUS = 52;
 const TOUCH_LOOK_SCALE = 1.7;
 
 /** Drag anywhere on the free screen area to look around. Each finger is tracked separately. */
-function LookArea() {
+export function LookArea() {
   const last = useRef(new Map<number, { x: number; y: number }>());
   const down = (e: RPointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -71,6 +71,8 @@ export function TouchControls() {
   };
   const useUp = () => { touch.useHeld = false; };
 
+  const inMg = useGame((st) => !!st.mg || (!!st.lobby && st.lobby.hostId !== st.sessionId));
+  if (inMg) return <LookArea />; // in a mini-game you can only look around
   return (
     <>
       <LookArea />

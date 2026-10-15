@@ -35,7 +35,7 @@ const ROOM_NAME = 'blocksy';
  * Bump on any breaking change to messages or shared rules. Client and server each carry a copy of
  * `shared/`; the server refuses clients whose version differs, with a clear error.
  */
-const PROTOCOL_VERSION = 2;
+const PROTOCOL_VERSION = 3;
 /** Players joining with the same multiplayerId share a room; this is used when none is given. */
 const DEFAULT_MULTIPLAYER_ID = 'public';
 const HOTBAR_SLOTS = 9;
@@ -755,6 +755,13 @@ interface ClientMessages {
   chat: { text: string };
   emoji: { id: EmojiId };
   emote: { id: EmoteId };
+  mgInvite: { kind: MiniGameKind };
+  mgCancel: Record<string, never>;
+  mgAccept: { hostId: string };
+  mgStart: Record<string, never>;
+  mgMove: { move: MiniGameMove };
+  mgLeave: Record<string, never>;
+  mgSpectate: { gameId: string };
 }
 
 /** Server → client messages. */
@@ -785,12 +792,430 @@ interface ServerMessages {
   teleport: { x: number; y: number; z: number };
 }
 
+// ---------- shared/minigames.ts ----------
+/**
+ * Popup mini-games: rules engines (pure, deterministic given the inputs) shared by client and server.
+ * - Rock Paper Scissors (2 players, best of N, simultaneous picks)
+ * - Tic Tac Toe (2 players)
+ * - Chess (2 players, full rules: castling, en passant, promotion, check/checkmate/stalemate, 50-move rule)
+ * - Ludo (2–4 players, classic rules: 6 to leave base, 6 rolls again, capture, safe squares, exact finish)
+ */
+
+type MiniGameKind = 'rps' | 'ttt' | 'chess' | 'ludo';
+
+interface MiniGameInfo { kind: MiniGameKind; name: string; icon: string; minPlayers: number; maxPlayers: number; board: boolean }
+const MINI_GAMES: readonly MiniGameInfo[] = [
+  { kind: 'rps', name: 'Rock Paper Scissors', icon: '✊', minPlayers: 2, maxPlayers: 2, board: false },
+  { kind: 'ttt', name: 'Tic Tac Toe', icon: '❌', minPlayers: 2, maxPlayers: 2, board: true },
+  { kind: 'chess', name: 'Chess', icon: '♟️', minPlayers: 2, maxPlayers: 2, board: true },
+  { kind: 'ludo', name: 'Ludo', icon: '🎲', minPlayers: 2, maxPlayers: 4, board: true },
+];
+const isMiniGameKind = (v: unknown): v is MiniGameKind => MINI_GAMES.some((g) => g.kind === v);
+const miniGameInfo = (k: MiniGameKind): MiniGameInfo => MINI_GAMES.find((g) => g.kind === k)!;
+
+/** Distance (m) within which a player can accept an invite / start watching a game. */
+const ACCEPT_RADIUS = 3.5;
+const SPECTATE_RADIUS = 7;
+
+// =====================================================================================================
+// Rock Paper Scissors
+// =====================================================================================================
+
+type RpsChoice = 'rock' | 'paper' | 'scissors';
+const RPS_CHOICES: readonly RpsChoice[] = ['rock', 'paper', 'scissors'];
+const RPS_ICON: Record<RpsChoice, string> = { rock: '🪨', paper: '✋', scissors: '✂️' };
+const isRpsChoice = (v: unknown): v is RpsChoice => (RPS_CHOICES as readonly unknown[]).includes(v);
+
+/** 0 = seat 0 wins, 1 = seat 1 wins, -1 = tie. */
+function rpsWinner(a: RpsChoice, b: RpsChoice): number {
+  if (a === b) return -1;
+  return (a === 'rock' && b === 'scissors') || (a === 'paper' && b === 'rock') || (a === 'scissors' && b === 'paper') ? 0 : 1;
+}
+
+// =====================================================================================================
+// Tic Tac Toe — cells: -1 empty, 0 = X (seat 0), 1 = O (seat 1)
+// =====================================================================================================
+
+interface TttState { cells: number[]; turn: number }
+const TTT_LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]] as const;
+const tttNew = (): TttState => ({ cells: new Array(9).fill(-1), turn: 0 });
+const tttLegal = (s: TttState): number[] => s.cells.flatMap((c, i) => (c === -1 ? [i] : []));
+
+function tttPlay(s: TttState, seat: number, cell: number): TttState | null {
+  if (seat !== s.turn || !Number.isInteger(cell) || cell < 0 || cell > 8 || s.cells[cell] !== -1 || tttResult(s).over) return null;
+  const cells = s.cells.slice();
+  cells[cell] = seat;
+  return { cells, turn: 1 - seat };
+}
+
+/** winner: seat index, or -1 for a draw (when over). */
+function tttResult(s: TttState): { over: boolean; winner: number; line: readonly number[] | null } {
+  for (const l of TTT_LINES) {
+    const v = s.cells[l[0]];
+    if (v !== -1 && v === s.cells[l[1]] && v === s.cells[l[2]]) return { over: true, winner: v, line: l };
+  }
+  return { over: s.cells.every((c) => c !== -1), winner: -1, line: null };
+}
+
+// =====================================================================================================
+// Chess — board[0] = a8 … board[63] = h1 (FEN order). White = uppercase, black = lowercase, '' empty.
+// =====================================================================================================
+
+type ChessColor = 'w' | 'b';
+type Promo = 'q' | 'r' | 'b' | 'n';
+interface ChessMove { from: number; to: number; promo?: Promo }
+interface ChessState { board: string[]; turn: ChessColor; castling: string; ep: number; half: number; full: number }
+
+const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR';
+function chessNew(): ChessState {
+  const board: string[] = [];
+  for (const ch of START_FEN.replace(/\//g, '')) {
+    if (/\d/.test(ch)) for (let i = 0; i < Number(ch); i++) board.push('');
+    else board.push(ch);
+  }
+  return { board, turn: 'w', castling: 'KQkq', ep: -1, half: 0, full: 1 };
+}
+
+const chessColorOf = (p: string): ChessColor | null => (p === '' ? null : p === p.toUpperCase() ? 'w' : 'b');
+const rf = (i: number) => [i >> 3, i & 7] as const;
+const at = (r: number, f: number) => (r < 0 || r > 7 || f < 0 || f > 7 ? -1 : r * 8 + f);
+const squareName = (i: number): string => `${'abcdefgh'[i & 7]}${8 - (i >> 3)}`;
+
+const KNIGHT = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
+const KING = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+const ROOK_DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+const BISHOP_DIRS = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+
+/** Is square `sq` attacked by any piece of colour `by`? */
+function chessAttacked(board: string[], sq: number, by: ChessColor): boolean {
+  const [r, f] = rf(sq);
+  const own = (p: string, type: string) => p !== '' && chessColorOf(p) === by && p.toLowerCase() === type;
+  // pawns: a white pawn attacks diagonally upward (row - 1)
+  const pr = by === 'w' ? r + 1 : r - 1;
+  for (const df of [-1, 1]) { const i = at(pr, f + df); if (i >= 0 && own(board[i], 'p')) return true; }
+  for (const [dr, df] of KNIGHT) { const i = at(r + dr, f + df); if (i >= 0 && own(board[i], 'n')) return true; }
+  for (const [dr, df] of KING) { const i = at(r + dr, f + df); if (i >= 0 && own(board[i], 'k')) return true; }
+  const slide = (dirs: number[][], types: string) => {
+    for (const [dr, df] of dirs) {
+      for (let k = 1; k < 8; k++) {
+        const i = at(r + dr * k, f + df * k);
+        if (i < 0) break;
+        const p = board[i];
+        if (p === '') continue;
+        if (chessColorOf(p) === by && types.includes(p.toLowerCase())) return true;
+        break;
+      }
+    }
+    return false;
+  };
+  return slide(ROOK_DIRS, 'rq') || slide(BISHOP_DIRS, 'bq');
+}
+
+const chessKing = (board: string[], c: ChessColor): number => board.indexOf(c === 'w' ? 'K' : 'k');
+const chessInCheck = (s: ChessState): boolean => chessAttacked(s.board, chessKing(s.board, s.turn), s.turn === 'w' ? 'b' : 'w');
+
+function pseudoMoves(s: ChessState): ChessMove[] {
+  const out: ChessMove[] = [];
+  const me = s.turn, them: ChessColor = me === 'w' ? 'b' : 'w';
+  const b = s.board;
+  const empty = (i: number) => i >= 0 && b[i] === '';
+  const enemy = (i: number) => i >= 0 && chessColorOf(b[i]) === them;
+  for (let from = 0; from < 64; from++) {
+    const p = b[from];
+    if (p === '' || chessColorOf(p) !== me) continue;
+    const [r, f] = rf(from);
+    const t = p.toLowerCase();
+    const push = (to: number) => {
+      if ((t === 'p') && ((me === 'w' && to >> 3 === 0) || (me === 'b' && to >> 3 === 7))) {
+        for (const promo of ['q', 'r', 'b', 'n'] as Promo[]) out.push({ from, to, promo });
+      } else out.push({ from, to });
+    };
+    if (t === 'p') {
+      const dir = me === 'w' ? -1 : 1, startRow = me === 'w' ? 6 : 1;
+      const one = at(r + dir, f);
+      if (empty(one)) {
+        push(one);
+        const two = at(r + 2 * dir, f);
+        if (r === startRow && empty(two)) out.push({ from, to: two });
+      }
+      for (const df of [-1, 1]) {
+        const c = at(r + dir, f + df);
+        if (c >= 0 && (enemy(c) || c === s.ep)) push(c);
+      }
+    } else if (t === 'n' || t === 'k') {
+      for (const [dr, df] of t === 'n' ? KNIGHT : KING) {
+        const i = at(r + dr, f + df);
+        if (i >= 0 && (b[i] === '' || enemy(i))) out.push({ from, to: i });
+      }
+      if (t === 'k') {
+        const row = me === 'w' ? 7 : 0;
+        if (from === row * 8 + 4 && !chessAttacked(b, from, them)) {
+          const K = me === 'w' ? 'K' : 'k', Q = me === 'w' ? 'Q' : 'q';
+          if (s.castling.includes(K) && b[row * 8 + 5] === '' && b[row * 8 + 6] === '' && b[row * 8 + 7].toLowerCase() === 'r'
+            && !chessAttacked(b, row * 8 + 5, them) && !chessAttacked(b, row * 8 + 6, them)) out.push({ from, to: row * 8 + 6 });
+          if (s.castling.includes(Q) && b[row * 8 + 3] === '' && b[row * 8 + 2] === '' && b[row * 8 + 1] === '' && b[row * 8].toLowerCase() === 'r'
+            && !chessAttacked(b, row * 8 + 3, them) && !chessAttacked(b, row * 8 + 2, them)) out.push({ from, to: row * 8 + 2 });
+        }
+      }
+    } else {
+      const dirs = t === 'r' ? ROOK_DIRS : t === 'b' ? BISHOP_DIRS : [...ROOK_DIRS, ...BISHOP_DIRS];
+      for (const [dr, df] of dirs) {
+        for (let k = 1; k < 8; k++) {
+          const i = at(r + dr * k, f + df * k);
+          if (i < 0) break;
+          if (b[i] === '') { out.push({ from, to: i }); continue; }
+          if (enemy(i)) out.push({ from, to: i });
+          break;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** Applies a move WITHOUT legality checks (use chessPlay for validated moves). */
+function chessApply(s: ChessState, m: ChessMove): ChessState {
+  const b = s.board.slice();
+  const p = b[m.from];
+  const t = p.toLowerCase();
+  const me = s.turn;
+  let capture = b[m.to] !== '';
+  // en passant capture
+  if (t === 'p' && m.to === s.ep && b[m.to] === '') {
+    b[m.to + (me === 'w' ? 8 : -8)] = '';
+    capture = true;
+  }
+  b[m.to] = p;
+  b[m.from] = '';
+  if (t === 'p' && (m.to >> 3 === 0 || m.to >> 3 === 7)) {
+    const promo = m.promo ?? 'q';
+    b[m.to] = me === 'w' ? promo.toUpperCase() : promo;
+  }
+  // castling: move the rook too
+  if (t === 'k' && Math.abs(m.to - m.from) === 2) {
+    const row = m.from >> 3;
+    if (m.to > m.from) { b[row * 8 + 5] = b[row * 8 + 7]; b[row * 8 + 7] = ''; }
+    else { b[row * 8 + 3] = b[row * 8]; b[row * 8] = ''; }
+  }
+  let castling = s.castling;
+  const drop = (c: string) => { castling = castling.replace(c, ''); };
+  if (p === 'K') { drop('K'); drop('Q'); }
+  if (p === 'k') { drop('k'); drop('q'); }
+  for (const sq of [m.from, m.to]) {
+    if (sq === 63) drop('K');
+    if (sq === 56) drop('Q');
+    if (sq === 7) drop('k');
+    if (sq === 0) drop('q');
+  }
+  const ep = t === 'p' && Math.abs(m.to - m.from) === 16 ? (m.from + m.to) / 2 : -1;
+  return {
+    board: b,
+    turn: me === 'w' ? 'b' : 'w',
+    castling,
+    ep,
+    half: t === 'p' || capture ? 0 : s.half + 1,
+    full: me === 'b' ? s.full + 1 : s.full,
+  };
+}
+
+/** All legal moves for the side to move. */
+function chessLegal(s: ChessState): ChessMove[] {
+  return pseudoMoves(s).filter((m) => {
+    const n = chessApply(s, m);
+    return !chessAttacked(n.board, chessKing(n.board, s.turn), n.turn);
+  });
+}
+
+/** Validated move; promotion defaults to queen. Returns null if illegal. */
+function chessPlay(s: ChessState, color: ChessColor, m: ChessMove): ChessState | null {
+  if (color !== s.turn || !m || !Number.isInteger(m.from) || !Number.isInteger(m.to)) return null;
+  const legal = chessLegal(s).find((x) => x.from === m.from && x.to === m.to && (x.promo ?? 'q') === (m.promo ?? 'q'));
+  return legal ? chessApply(s, legal) : null;
+}
+
+type ChessStatus = 'playing' | 'checkmate' | 'stalemate' | 'draw50' | 'insufficient';
+function chessStatus(s: ChessState): ChessStatus {
+  if (chessLegal(s).length === 0) return chessInCheck(s) ? 'checkmate' : 'stalemate';
+  if (s.half >= 100) return 'draw50';
+  const rest = s.board.filter((p) => p !== '' && p.toLowerCase() !== 'k').map((p) => p.toLowerCase());
+  if (rest.length === 0 || (rest.length === 1 && (rest[0] === 'b' || rest[0] === 'n'))) return 'insufficient';
+  return 'playing';
+}
+
+// =====================================================================================================
+// Ludo — 15×15 board. Colours: 0 red (top-left), 1 green (top-right), 2 yellow (bottom-right), 3 blue (bottom-left).
+// Token position: -1 = base, 0..50 = main track (relative to the colour's start), 51..55 = home column, 56 = finished.
+// =====================================================================================================
+
+const LUDO_COLORS = ['red', 'green', 'yellow', 'blue'] as const;
+const LUDO_FINISH = 56;
+const LUDO_SAFE = [0, 8, 13, 21, 26, 34, 39, 47] as const;
+
+/** The 52 main-track squares as [x, y] (y down), starting at red's start square. */
+const LUDO_TRACK: readonly [number, number][] = (() => {
+  const t: [number, number][] = [];
+  const seg = (xs: number[], ys: number[]) => { for (let i = 0; i < xs.length; i++) t.push([xs[i], ys[i]]); };
+  const range = (a: number, b: number) => (a <= b ? Array.from({ length: b - a + 1 }, (_, i) => a + i) : Array.from({ length: a - b + 1 }, (_, i) => a - i));
+  const rep = (v: number, n: number) => new Array(n).fill(v);
+  seg(range(1, 5), rep(6, 5)); seg(rep(6, 6), range(5, 0)); seg([7, 8], [0, 0]);
+  seg(rep(8, 5), range(1, 5)); seg(range(9, 14), rep(6, 6)); seg([14, 14], [7, 8]);
+  seg(range(13, 9), rep(8, 5)); seg(rep(8, 6), range(9, 14)); seg([7, 6], [14, 14]);
+  seg(rep(6, 5), range(13, 9)); seg(range(5, 0), rep(8, 6)); seg([0, 0], [7, 6]);
+  return t;
+})();
+const HOME_COLUMN: readonly [number, number][][] = [
+  [[1, 7], [2, 7], [3, 7], [4, 7], [5, 7]],
+  [[7, 1], [7, 2], [7, 3], [7, 4], [7, 5]],
+  [[13, 7], [12, 7], [11, 7], [10, 7], [9, 7]],
+  [[7, 13], [7, 12], [7, 11], [7, 10], [7, 9]],
+];
+const BASE_SPOTS: readonly [number, number][][] = [
+  [[1.75, 1.75], [3.25, 1.75], [1.75, 3.25], [3.25, 3.25]],
+  [[10.75, 1.75], [12.25, 1.75], [10.75, 3.25], [12.25, 3.25]],
+  [[10.75, 10.75], [12.25, 10.75], [10.75, 12.25], [12.25, 12.25]],
+  [[1.75, 10.75], [3.25, 10.75], [1.75, 12.25], [3.25, 12.25]],
+];
+const FINISH_SPOT: readonly [number, number][] = [[6.6, 7], [7, 6.6], [7.4, 7], [7, 7.4]];
+
+/** Board cell (x, y in 0..15, cell units, centre of the cell) of a token. */
+function ludoCell(color: number, token: number, pos: number): [number, number] {
+  if (pos < 0) return [BASE_SPOTS[color][token][0] + 0.5, BASE_SPOTS[color][token][1] + 0.5];
+  if (pos >= LUDO_FINISH) return [FINISH_SPOT[color][0] + 0.5, FINISH_SPOT[color][1] + 0.5];
+  if (pos > 50) { const c = HOME_COLUMN[color][pos - 51]; return [c[0] + 0.5, c[1] + 0.5]; }
+  const c = LUDO_TRACK[(color * 13 + pos) % 52];
+  return [c[0] + 0.5, c[1] + 0.5];
+}
+const ludoHomeColumn = (color: number): readonly [number, number][] => HOME_COLUMN[color];
+
+/** Seats → colours: 2 players sit opposite (red/yellow), 3–4 go round. */
+const ludoColorsFor = (n: number): number[] => (n === 2 ? [0, 2] : n === 3 ? [0, 1, 2] : [0, 1, 2, 3]);
+
+interface LudoState {
+  colors: number[];
+  tokens: number[][];
+  /** Seats that left the game (skipped, tokens removed). */
+  out: boolean[];
+  turn: number;
+  dice: number;
+  phase: 'roll' | 'move';
+  winner: number;
+}
+
+function ludoNew(players: number): LudoState {
+  const n = Math.max(2, Math.min(4, players));
+  return { colors: ludoColorsFor(n), tokens: Array.from({ length: n }, () => [-1, -1, -1, -1]), out: new Array(n).fill(false), turn: 0, dice: 0, phase: 'roll', winner: -1 };
+}
+
+function ludoMovable(s: LudoState): number[] {
+  if (s.phase !== 'move' || s.winner >= 0) return [];
+  return s.tokens[s.turn].flatMap((p, t) => ((p < 0 ? s.dice === 6 : p + s.dice <= LUDO_FINISH && p < LUDO_FINISH) ? [t] : []));
+}
+
+function nextSeat(s: LudoState, from: number): number {
+  for (let k = 1; k <= s.tokens.length; k++) {
+    const i = (from + k) % s.tokens.length;
+    if (!s.out[i]) return i;
+  }
+  return from;
+}
+
+/** Roll (value 1..6 supplied by the server). If no token can move, the turn passes. */
+function ludoRoll(s: LudoState, seat: number, value: number): LudoState | null {
+  if (s.winner >= 0 || s.phase !== 'roll' || seat !== s.turn || !Number.isInteger(value) || value < 1 || value > 6) return null;
+  const n: LudoState = { ...s, dice: value, phase: 'move', tokens: s.tokens.map((t) => t.slice()) };
+  if (ludoMovable(n).length === 0) return { ...n, phase: 'roll', turn: nextSeat(n, seat) };
+  return n;
+}
+
+function ludoMove(s: LudoState, seat: number, token: number): LudoState | null {
+  if (seat !== s.turn || !ludoMovable(s).includes(token)) return null;
+  const tokens = s.tokens.map((t) => t.slice());
+  const from = tokens[seat][token];
+  const to = from < 0 ? 0 : from + s.dice;
+  tokens[seat][token] = to;
+  if (to <= 50) {
+    const abs = (s.colors[seat] * 13 + to) % 52;
+    if (!(LUDO_SAFE as readonly number[]).includes(abs)) {
+      tokens.forEach((list, other) => {
+        if (other === seat || s.out[other]) return;
+        list.forEach((p, i) => { if (p >= 0 && p <= 50 && (s.colors[other] * 13 + p) % 52 === abs) list[i] = -1; });
+      });
+    }
+  }
+  const won = tokens[seat].every((p) => p === LUDO_FINISH);
+  return {
+    ...s, tokens, dice: 0, phase: 'roll',
+    winner: won ? seat : -1,
+    turn: won ? seat : s.dice === 6 ? seat : nextSeat(s, seat),
+  };
+}
+
+/** A seat leaves: its tokens disappear and it is skipped. Returns the state; check `active` count yourself. */
+function ludoLeave(s: LudoState, seat: number): LudoState {
+  const out = s.out.slice();
+  out[seat] = true;
+  const tokens = s.tokens.map((t, i) => (i === seat ? [-1, -1, -1, -1] : t.slice()));
+  const n: LudoState = { ...s, out, tokens };
+  return s.turn === seat ? { ...n, turn: nextSeat(n, seat), phase: 'roll', dice: 0 } : n;
+}
+const ludoActive = (s: LudoState): number[] => s.out.flatMap((o, i) => (o ? [] : [i]));
+
+// =====================================================================================================
+// Network protocol for mini-games
+// =====================================================================================================
+
+type LudoAction = { type: 'roll' } | { type: 'move'; token: number };
+type MiniGameMove = RpsChoice | number | ChessMove | LudoAction;
+
+interface MgPlayer { id: string; name: string; seat: number }
+interface MgResult { winners: string[]; reason: string }
+
+/** What a participant or spectator sees. Hidden information (the opponent's RPS pick) is never included. */
+interface MgView {
+  id: string;
+  kind: MiniGameKind;
+  role: 'player' | 'spectator';
+  you: number;
+  players: MgPlayer[];
+  spectators: number;
+  turnSeat: number;
+  deadlineMs: number;
+  phase: 'playing' | 'reveal' | 'over';
+  result: MgResult | null;
+  seatYaw?: number;
+  rps?: { round: number; target: number; scores: number[]; myPick: RpsChoice | null; picked: boolean[]; reveal: (RpsChoice | null)[] | null; roundWinner: number };
+  ttt?: { cells: number[]; line: number[] | null };
+  chess?: { board: string[]; turn: ChessColor; check: boolean; last: ChessMove | null; legal: ChessMove[]; status: ChessStatus };
+  ludo?: { colors: number[]; tokens: number[][]; out: boolean[]; dice: number; phase: 'roll' | 'move'; movable: number[]; lastRoll: number };
+}
+
+/** Ludo lobby (host + up to 3 guests) shown to its members until the host starts. */
+interface MgLobby { hostId: string; kind: MiniGameKind; members: { id: string; name: string }[] }
+
+/** Public listing of a running game (in every `state`), for tables, poses and spectating. */
+interface MgListing {
+  id: string;
+  kind: MiniGameKind;
+  x: number; y: number; z: number;
+  seats: { id: string; x: number; z: number; yaw: number }[];
+  spectators: number;
+  /** RPS picks, only after a round is revealed. */
+  reveal?: Record<string, RpsChoice>;
+  phase: 'playing' | 'reveal' | 'over';
+}
+
 // =====================================================================================================
 // SETTINGS (dashboard → Custom settings; every value is validated, with a default)
 // =====================================================================================================
 
 interface BlocksySettings {
   worldSeed: number;
+  inviteAcceptDelaySec: number;
+  rpsPickSec: number;
+  rpsBestOf: number;
+  tttTurnSec: number;
+  chessTurnSec: number;
+  ludoTurnSec: number;
   sessionMinutes: number;
   editsPerSecond: number;
   chatEnabled: boolean;
@@ -802,6 +1227,12 @@ function readSettings(roomName: string): BlocksySettings {
     typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : def;
   return {
     worldSeed: int(raw.worldSeed, 1337, 1, 2_147_483_647),
+    inviteAcceptDelaySec: int(raw.inviteAcceptDelaySec, 5, 0, 60),
+    rpsPickSec: int(raw.rpsPickSec, 3, 2, 15),
+    rpsBestOf: int(raw.rpsBestOf, 3, 1, 9),
+    tttTurnSec: int(raw.tttTurnSec, 15, 5, 120),
+    chessTurnSec: int(raw.chessTurnSec, 60, 10, 600),
+    ludoTurnSec: int(raw.ludoTurnSec, 10, 3, 60),
     sessionMinutes: int(raw.sessionMinutes, 0, 0, 240), // fallback only; Round duration (backend) wins
     editsPerSecond: int(raw.editsPerSecond, 12, 1, 30),
     chatEnabled: typeof raw.chatEnabled === 'boolean' ? raw.chatEnabled : true,
@@ -859,6 +1290,7 @@ interface Player {
 
 /** Messages per second per player. "move" is sent at 15 Hz by the client. */
 const RATE_LIMITS: Record<string, number> = {
+  mgInvite: 2, mgCancel: 2, mgAccept: 2, mgStart: 2, mgMove: 6, mgLeave: 2, mgSpectate: 2,
   move: 20, place: 12, remove: 12, hotbar: 10, buy: 5, appearance: 2, restore: 1, chat: 2, emoji: 2, emote: 1,
 };
 const STATE_INTERVAL_MS = 100;
@@ -870,6 +1302,387 @@ const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInt
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
+
+
+// =====================================================================================================
+// MINI-GAMES — invites, sessions, turns, timeouts (random play), spectators. Server-authoritative.
+// =====================================================================================================
+
+interface MgInvite { hostId: string; kind: MiniGameKind; since: number; guests: string[]; expiry: Delayed | null }
+interface MgSession {
+  id: string;
+  kind: MiniGameKind;
+  seats: string[];
+  names: string[];
+  spectators: Set<string>;
+  table: { x: number; y: number; z: number };
+  seatPos: { id: string; x: number; z: number; yaw: number }[];
+  phase: 'playing' | 'reveal' | 'over';
+  result: MgResult | null;
+  timer: Delayed | null;
+  deadline: number;
+  rps?: { round: number; target: number; scores: number[]; picks: (RpsChoice | null)[]; reveal: (RpsChoice | null)[] | null; roundWinner: number };
+  ttt?: TttState;
+  chess?: { state: ChessState; last: ChessMove | null };
+  ludo?: { state: LudoState; lastRoll: number };
+}
+interface HubDeps {
+  clock: { setTimeout(fn: () => void, ms: number): Delayed };
+  players: Map<string, Player>;
+  settings: () => BlocksySettings;
+  send: (sessionId: string, type: string, msg: unknown) => void;
+}
+
+const INVITE_TTL_MS = 3 * 60_000;
+const RPS_REVEAL_MS = 2500;
+const RESULT_HOLD_MS = 4000;
+const SEAT_RADIUS = 0.95;
+const pickRandom = <T>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)];
+
+class MiniGameHub {
+  private readonly invites = new Map<string, MgInvite>();
+  private readonly sessions = new Map<string, MgSession>();
+  private readonly seatOf = new Map<string, string>();
+  private readonly watching = new Map<string, string>();
+  private readonly lobbyOf = new Map<string, string>();
+  private counter = 0;
+
+  constructor(private readonly d: HubDeps) {}
+
+  /** In a game, watching one, or waiting in a Ludo lobby: no walking, building or trading. */
+  locked(id: string): boolean { return this.seatOf.has(id) || this.watching.has(id) || this.lobbyOf.has(id); }
+  /** Seated player (emotes disabled). */
+  playing(id: string): boolean { return this.seatOf.has(id); }
+
+  /** Per-player public tags for the state message. */
+  tags(id: string): { inv: MiniGameKind | ''; invAgeMs: number; mg: string } {
+    const inv = this.invites.get(id);
+    return { inv: inv ? inv.kind : '', invAgeMs: inv ? Date.now() - inv.since : 0, mg: this.seatOf.get(id) ?? this.watching.get(id) ?? '' };
+  }
+
+  listing(): MgListing[] {
+    return [...this.sessions.values()].map((s) => {
+      const l: MgListing = { id: s.id, kind: s.kind, ...s.table, seats: s.seatPos, spectators: s.spectators.size, phase: s.phase };
+      if (s.rps?.reveal) l.reveal = Object.fromEntries(s.seats.map((id, i) => [id, s.rps!.reveal![i]!]).filter(([, v]) => !!v));
+      return l;
+    });
+  }
+
+  // ---------------- invites & lobby ----------------
+
+  invite(id: string, kind: MiniGameKind): void {
+    if (this.locked(id) || !this.d.players.get(id)) return;
+    this.cancel(id);
+    const inv: MgInvite = { hostId: id, kind, since: Date.now(), guests: [], expiry: null };
+    inv.expiry = this.d.clock.setTimeout(() => this.cancel(id), INVITE_TTL_MS);
+    this.invites.set(id, inv);
+    if (kind === 'ludo') this.sendLobby(inv);
+  }
+
+  cancel(hostId: string): void {
+    const inv = this.invites.get(hostId);
+    if (!inv) return;
+    inv.expiry?.clear();
+    this.invites.delete(hostId);
+    for (const g of [hostId, ...inv.guests]) {
+      this.lobbyOf.delete(g);
+      this.d.send(g, 'mgLobby', null);
+    }
+  }
+
+  accept(guestId: string, hostId: string): string | null {
+    const inv = this.invites.get(hostId);
+    const g = this.d.players.get(guestId), h = this.d.players.get(hostId);
+    if (!inv || !g || !h || guestId === hostId) return 'This invite is no longer open.';
+    if (this.locked(guestId)) return 'You are already in a game.';
+    if (Math.hypot(g.x - h.x, g.z - h.z) > ACCEPT_RADIUS + 0.5) return 'Walk closer to accept.';
+    const wait = this.d.settings().inviteAcceptDelaySec * 1000 - (Date.now() - inv.since);
+    if (wait > 0) return `You can join in ${Math.ceil(wait / 1000)} s.`;
+    this.cancel(guestId); // a guest's own open invite is withdrawn
+    if (inv.kind !== 'ludo') {
+      this.invites.delete(hostId);
+      inv.expiry?.clear();
+      this.start(inv.kind, [hostId, guestId]);
+      return null;
+    }
+    if (inv.guests.includes(guestId)) return null;
+    if (inv.guests.length >= miniGameInfo('ludo').maxPlayers - 1) return 'This Ludo table is full.';
+    inv.guests.push(guestId);
+    this.lobbyOf.set(guestId, hostId);
+    this.sendLobby(inv);
+    return null;
+  }
+
+  startLobby(hostId: string): void {
+    const inv = this.invites.get(hostId);
+    if (!inv || inv.kind !== 'ludo' || inv.guests.length < 1) return;
+    const ids = [hostId, ...inv.guests].filter((x) => this.d.players.has(x));
+    inv.expiry?.clear();
+    this.invites.delete(hostId);
+    for (const g of ids) { this.lobbyOf.delete(g); this.d.send(g, 'mgLobby', null); }
+    if (ids.length >= 2) this.start('ludo', ids);
+  }
+
+  private sendLobby(inv: MgInvite): void {
+    const members = [inv.hostId, ...inv.guests].map((id) => ({ id, name: this.d.players.get(id)?.username ?? 'Player' }));
+    const view: MgLobby = { hostId: inv.hostId, kind: inv.kind, members };
+    for (const m of members) this.d.send(m.id, 'mgLobby', view);
+  }
+
+  // ---------------- sessions ----------------
+
+  private start(kind: MiniGameKind, ids: string[]): void {
+    const ps = ids.map((id) => this.d.players.get(id)!);
+    const host = ps[0];
+    const cx = ps.reduce((n, p) => n + p.x, 0) / ps.length, cz = ps.reduce((n, p) => n + p.z, 0) / ps.length;
+    let dx = ps[1].x - host.x, dz = ps[1].z - host.z;
+    const len = Math.hypot(dx, dz) || 1;
+    dx /= len; dz /= len;
+    const s: MgSession = {
+      id: `g${Date.now().toString(36)}${(this.counter++).toString(36)}`,
+      kind, seats: ids, names: ps.map((p) => p.username), spectators: new Set(),
+      table: { x: round3(cx), y: round3(host.y), z: round3(cz) }, seatPos: [],
+      phase: 'playing', result: null, timer: null, deadline: 0,
+    };
+    if (kind === 'rps') {
+      // Stand where they are, facing each other.
+      s.seatPos = ps.map((p, i) => {
+        const o = ps[1 - i];
+        return { id: p.sessionId, x: round3(p.x), z: round3(p.z), yaw: round3(Math.atan2(o.x - p.x, o.z - p.z)) };
+      });
+      s.seatPos.forEach((seat, i) => { ps[i].yaw = seat.yaw; this.d.send(seat.id, 'teleport', { x: ps[i].x, y: ps[i].y, z: ps[i].z, yaw: seat.yaw }); });
+    } else {
+      // Sit around a table that appears between the players.
+      const n = ps.length;
+      s.seatPos = ps.map((p, i) => {
+        const a = (i * 2 * Math.PI) / n;
+        const ox = -dx * Math.cos(a) + dz * Math.sin(a), oz = -dz * Math.cos(a) - dx * Math.sin(a);
+        const x = cx + ox * SEAT_RADIUS, z = cz + oz * SEAT_RADIUS;
+        return { id: p.sessionId, x: round3(x), z: round3(z), yaw: round3(Math.atan2(cx - x, cz - z)) };
+      });
+      s.seatPos.forEach((seat, i) => {
+        const p = ps[i];
+        p.x = seat.x; p.z = seat.z; p.y = host.y; p.yaw = seat.yaw;
+        this.d.send(seat.id, 'teleport', { x: seat.x, y: host.y, z: seat.z, yaw: seat.yaw });
+      });
+    }
+    for (const id of ids) { this.cancel(id); this.seatOf.set(id, s.id); }
+    this.sessions.set(s.id, s);
+    if (kind === 'rps') { s.rps = { round: 0, target: Math.floor(this.d.settings().rpsBestOf / 2) + 1, scores: [0, 0], picks: [null, null], reveal: null, roundWinner: -1 }; this.rpsRound(s); }
+    if (kind === 'ttt') { s.ttt = tttNew(); this.arm(s, this.d.settings().tttTurnSec * 1000, () => this.autoPlay(s)); }
+    if (kind === 'chess') { s.chess = { state: chessNew(), last: null }; this.arm(s, this.d.settings().chessTurnSec * 1000, () => this.autoPlay(s)); }
+    if (kind === 'ludo') { s.ludo = { state: ludoNew(ids.length), lastRoll: 0 }; this.arm(s, this.d.settings().ludoTurnSec * 1000, () => this.autoPlay(s)); }
+    console.log(`[blocksy] ${kind} started: ${s.names.join(' vs ')}`);
+    this.push(s);
+  }
+
+  private arm(s: MgSession, ms: number, fn: () => void): void {
+    s.timer?.clear();
+    s.deadline = Date.now() + ms;
+    s.timer = this.d.clock.setTimeout(fn, ms);
+  }
+
+  private turnSeat(s: MgSession): number {
+    if (s.ttt) return s.ttt.turn;
+    if (s.chess) return s.chess.state.turn === 'w' ? 0 : 1;
+    if (s.ludo) return s.ludo.state.turn;
+    return -1;
+  }
+
+  private rpsRound(s: MgSession): void {
+    const r = s.rps!;
+    r.round += 1; r.picks = [null, null]; r.reveal = null; r.roundWinner = -1;
+    s.phase = 'playing';
+    this.arm(s, this.d.settings().rpsPickSec * 1000, () => this.rpsResolve(s));
+    this.push(s);
+  }
+
+  private rpsResolve(s: MgSession): void {
+    const r = s.rps!;
+    const picks = r.picks.map((p) => p ?? pickRandom(RPS_CHOICES)) as RpsChoice[]; // no choice → random pick
+    r.reveal = picks;
+    r.roundWinner = rpsWinner(picks[0], picks[1]);
+    if (r.roundWinner >= 0) r.scores[r.roundWinner] += 1;
+    s.phase = 'reveal';
+    this.arm(s, RPS_REVEAL_MS, () => {
+      const w = r.scores.findIndex((v) => v >= r.target);
+      if (w >= 0) this.finish(s, [s.seats[w]], 'won');
+      else this.rpsRound(s);
+    });
+    this.push(s);
+  }
+
+  /** Time ran out: the server plays a random legal move for the player whose turn it is. */
+  private autoPlay(s: MgSession): void {
+    const seat = this.turnSeat(s);
+    if (s.ttt) this.applyMove(s, seat, pickRandom(tttLegal(s.ttt)));
+    else if (s.chess) this.applyMove(s, seat, pickRandom(chessLegal(s.chess.state)));
+    else if (s.ludo) {
+      const l = s.ludo.state;
+      this.applyMove(s, seat, l.phase === 'roll' ? { type: 'roll' } : { type: 'move', token: pickRandom(ludoMovable(l)) });
+    }
+  }
+
+  move(id: string, payload: unknown): void {
+    const sid = this.seatOf.get(id);
+    const s = sid ? this.sessions.get(sid) : undefined;
+    if (!s || s.phase === 'over') return;
+    const seat = s.seats.indexOf(id);
+    if (s.rps) {
+      if (s.phase !== 'playing' || !isRpsChoice(payload) || s.rps.picks[seat]) return;
+      s.rps.picks[seat] = payload;
+      if (s.rps.picks.every((p) => !!p)) this.rpsResolve(s);
+      else this.push(s);
+      return;
+    }
+    if (seat !== this.turnSeat(s)) return;
+    this.applyMove(s, seat, payload);
+  }
+
+  private applyMove(s: MgSession, seat: number, m: unknown): void {
+    const st = this.d.settings();
+    if (s.ttt) {
+      const next = typeof m === 'number' ? tttPlay(s.ttt, seat, m) : null;
+      if (!next) return;
+      s.ttt = next;
+      const r = tttResult(next);
+      if (r.over) return this.finish(s, r.winner >= 0 ? [s.seats[r.winner]] : [], r.winner >= 0 ? 'won' : 'draw');
+      this.arm(s, st.tttTurnSec * 1000, () => this.autoPlay(s));
+    } else if (s.chess) {
+      const mv = isObj(m) && isInt(m.from) && isInt(m.to) ? { from: m.from, to: m.to, promo: (['q', 'r', 'b', 'n'] as const).find((p) => p === m.promo) } : null;
+      const next = mv ? chessPlay(s.chess.state, seat === 0 ? 'w' : 'b', mv) : null;
+      if (!next || !mv) return;
+      s.chess = { state: next, last: mv };
+      const status = chessStatus(next);
+      if (status === 'checkmate') return this.finish(s, [s.seats[seat]], 'checkmate');
+      if (status !== 'playing') return this.finish(s, [], status);
+      this.arm(s, st.chessTurnSec * 1000, () => this.autoPlay(s));
+    } else if (s.ludo) {
+      if (!isObj(m)) return;
+      let next: LudoState | null = null;
+      if (m.type === 'roll') {
+        const value = 1 + Math.floor(Math.random() * 6);
+        next = ludoRoll(s.ludo.state, seat, value);
+        if (next) s.ludo.lastRoll = value;
+      } else if (m.type === 'move' && isInt(m.token)) next = ludoMove(s.ludo.state, seat, m.token);
+      if (!next) return;
+      s.ludo.state = next;
+      if (next.winner >= 0) return this.finish(s, [s.seats[next.winner]], 'won');
+      this.arm(s, st.ludoTurnSec * 1000, () => this.autoPlay(s));
+    }
+    this.push(s);
+  }
+
+  private finish(s: MgSession, winners: string[], reason: string): void {
+    if (s.phase === 'over') return;
+    s.phase = 'over';
+    s.result = { winners, reason };
+    this.arm(s, RESULT_HOLD_MS, () => this.close(s));
+    this.push(s);
+    console.log(`[blocksy] ${s.kind} over (${reason}): ${winners.map((w) => this.d.players.get(w)?.username ?? w).join(', ') || 'draw'}`);
+  }
+
+  private close(s: MgSession): void {
+    s.timer?.clear();
+    this.sessions.delete(s.id);
+    for (const id of [...s.seats, ...s.spectators]) {
+      if (this.seatOf.get(id) === s.id) this.seatOf.delete(id);
+      if (this.watching.get(id) === s.id) this.watching.delete(id);
+      this.d.send(id, 'mgEnded', { id: s.id });
+    }
+  }
+
+  spectate(id: string, gameId: string): string | null {
+    const s = this.sessions.get(gameId);
+    const p = this.d.players.get(id);
+    if (!s || !p || s.phase === 'over') return 'That game has finished.';
+    if (this.locked(id)) return 'You are already in a game.';
+    if (Math.hypot(p.x - s.table.x, p.z - s.table.z) > SPECTATE_RADIUS + 0.5) return 'Walk closer to watch.';
+    this.cancel(id);
+    s.spectators.add(id);
+    this.watching.set(id, s.id);
+    this.push(s);
+    return null;
+  }
+
+  /** Leave whatever the player is part of: game (forfeit), spectating, lobby or own invite. */
+  leave(id: string): void {
+    const lobbyHost = this.lobbyOf.get(id);
+    if (lobbyHost) {
+      const inv = this.invites.get(lobbyHost);
+      this.lobbyOf.delete(id);
+      this.d.send(id, 'mgLobby', null);
+      if (inv) { inv.guests = inv.guests.filter((g) => g !== id); this.sendLobby(inv); }
+    }
+    this.cancel(id);
+    const wid = this.watching.get(id);
+    if (wid) {
+      this.watching.delete(id);
+      const s = this.sessions.get(wid);
+      if (s) { s.spectators.delete(id); this.push(s); }
+      this.d.send(id, 'mgEnded', { id: wid });
+    }
+    const sid = this.seatOf.get(id);
+    const s = sid ? this.sessions.get(sid) : undefined;
+    if (!s) return;
+    this.seatOf.delete(id);
+    this.d.send(id, 'mgEnded', { id: s.id });
+    if (s.phase === 'over') return;
+    const seat = s.seats.indexOf(id);
+    if (s.ludo) {
+      s.ludo.state = ludoLeave(s.ludo.state, seat);
+      const active = ludoActive(s.ludo.state);
+      if (active.length < 2) return this.finish(s, active.map((i) => s.seats[i]), 'left');
+      this.arm(s, this.d.settings().ludoTurnSec * 1000, () => this.autoPlay(s));
+      this.push(s);
+      return;
+    }
+    this.finish(s, s.seats.filter((x) => x !== id), 'left');
+  }
+
+  /** After a reconnect: resend whatever the player is part of. */
+  resend(id: string): void {
+    const sid = this.seatOf.get(id) ?? this.watching.get(id);
+    const s = sid ? this.sessions.get(sid) : undefined;
+    if (s) this.d.send(id, 'mg', this.view(s, id));
+    const host = this.lobbyOf.get(id) ?? (this.invites.get(id)?.kind === 'ludo' ? id : undefined);
+    const inv = host ? this.invites.get(host) : undefined;
+    if (inv) this.sendLobby(inv);
+  }
+
+  private push(s: MgSession): void {
+    for (const id of [...s.seats, ...s.spectators]) {
+      if (this.seatOf.get(id) === s.id || this.watching.get(id) === s.id) this.d.send(id, 'mg', this.view(s, id));
+    }
+  }
+
+  private view(s: MgSession, viewer: string): MgView {
+    const you = s.seats.indexOf(viewer);
+    const turn = this.turnSeat(s);
+    const v: MgView = {
+      id: s.id, kind: s.kind, role: you >= 0 ? 'player' : 'spectator', you,
+      players: s.seats.map((id, seat) => ({ id, name: s.names[seat], seat })),
+      spectators: s.spectators.size, turnSeat: turn, deadlineMs: Math.max(0, s.deadline - Date.now()),
+      phase: s.phase, result: s.result,
+    };
+    if (you >= 0) v.seatYaw = s.seatPos[you]?.yaw;
+    if (s.rps) {
+      const r = s.rps;
+      v.rps = { round: r.round, target: r.target, scores: r.scores.slice(), myPick: you >= 0 ? r.picks[you] : null, picked: r.picks.map((p) => !!p), reveal: r.reveal, roundWinner: r.roundWinner };
+    }
+    if (s.ttt) v.ttt = { cells: s.ttt.cells.slice(), line: tttResult(s.ttt).line?.slice() ?? null };
+    if (s.chess) {
+      const st = s.chess.state;
+      const mine = you >= 0 && you === turn && s.phase === 'playing';
+      v.chess = { board: st.board, turn: st.turn, check: chessInCheck(st), last: s.chess.last, legal: mine ? chessLegal(st) : [], status: chessStatus(st) };
+    }
+    if (s.ludo) {
+      const st = s.ludo.state;
+      v.ludo = { colors: st.colors, tokens: st.tokens, out: st.out, dice: st.dice, phase: st.phase, movable: you === turn ? ludoMovable(st) : [], lastRoll: s.ludo.lastRoll };
+    }
+    return v;
+  }
+}
 
 export default class BlocksyRoom extends Room {
   private readonly grid: BlockGrid = createWorldGrid();
@@ -886,6 +1699,7 @@ export default class BlocksyRoom extends Room {
   private endsAt = 0;
   private finished = false;
   private stateTimer: Delayed | null = null;
+  private hub!: MiniGameHub;
   private sessionTimer: Delayed | null = null;
 
   onCreate(options: Record<string, unknown> = {}): void {
@@ -894,6 +1708,12 @@ export default class BlocksyRoom extends Room {
     this.layout = generateIsland(this.grid, this.settings.worldSeed);
     this.startedAt = Date.now();
     this.stateTimer = this.clock.setInterval(() => this.broadcastState(), STATE_INTERVAL_MS);
+    this.hub = new MiniGameHub({
+      clock: this.clock,
+      players: this.players,
+      settings: () => this.settings,
+      send: (id, type, msg) => { for (const c of this.clients) if (c.sessionId === id) c.send(type, msg); },
+    });
     // The session timer starts after the first join, once the match config is known (see startSessionTimer).
 
     this.onMessage('move', (c: Client, m: ClientMessages['move']) => { if (this.guard(c, 'move')) this.handleMove(c, m); });
@@ -908,7 +1728,24 @@ export default class BlocksyRoom extends Room {
       if (this.guard(c, 'emoji') && isEmojiId(m?.id)) this.broadcast('emoji', { sessionId: c.sessionId, id: m.id });
     });
     this.onMessage('emote', (c: Client, m: ClientMessages['emote']) => {
-      if (this.guard(c, 'emote') && isEmoteId(m?.id)) this.broadcast('emote', { sessionId: c.sessionId, id: m.id });
+      if (this.guard(c, 'emote') && isEmoteId(m?.id) && !this.hub.playing(c.sessionId)) this.broadcast('emote', { sessionId: c.sessionId, id: m.id });
+    });
+    this.onMessage('mgInvite', (c: Client, m: { kind?: unknown }) => {
+      if (this.guard(c, 'mgInvite') && isObj(m) && isMiniGameKind(m.kind)) this.hub.invite(c.sessionId, m.kind);
+    });
+    this.onMessage('mgCancel', (c: Client) => { if (this.guard(c, 'mgCancel')) this.hub.cancel(c.sessionId); });
+    this.onMessage('mgAccept', (c: Client, m: { hostId?: unknown }) => {
+      if (!this.guard(c, 'mgAccept') || !isObj(m) || typeof m.hostId !== 'string') return;
+      const err = this.hub.accept(c.sessionId, m.hostId);
+      if (err) c.send('mgError', { message: err });
+    });
+    this.onMessage('mgStart', (c: Client) => { if (this.guard(c, 'mgStart')) this.hub.startLobby(c.sessionId); });
+    this.onMessage('mgMove', (c: Client, m: { move?: unknown }) => { if (this.guard(c, 'mgMove') && isObj(m)) this.hub.move(c.sessionId, m.move); });
+    this.onMessage('mgLeave', (c: Client) => { if (this.guard(c, 'mgLeave')) this.hub.leave(c.sessionId); });
+    this.onMessage('mgSpectate', (c: Client, m: { gameId?: unknown }) => {
+      if (!this.guard(c, 'mgSpectate') || !isObj(m) || typeof m.gameId !== 'string') return;
+      const err = this.hub.spectate(c.sessionId, m.gameId);
+      if (err) c.send('mgError', { message: err });
     });
     this.onMessage('*', (c: Client, type: string | number) => { this.checkRate(c, 'other'); void type; });
     if (this.roomName !== ROOM_NAME) console.warn(`[blocksy] game key is "${this.roomName}", client expects "${ROOM_NAME}"`);
@@ -971,11 +1808,13 @@ export default class BlocksyRoom extends Room {
         p.lastMove = Date.now();
         // The world may have changed while away: resend the full snapshot.
         this.sendInit(client, p, { x: p.x, y: p.y, z: p.z, yaw: p.yaw });
+        this.hub.resend(client.sessionId);
         return;
       } catch {
         // reconnection window expired
       }
     }
+    this.hub.leave(client.sessionId);
     this.players.delete(client.sessionId);
     this.buckets.delete(client.sessionId);
     this.publishMetadata();
@@ -1084,13 +1923,14 @@ export default class BlocksyRoom extends Room {
   /** Public snapshot only (no user secrets); disconnected players are left out until they return. */
   private broadcastState(): void {
     if (this.players.size === 0) return;
-    const players: (PlayerSnapshot & { userId: string; username: string; avatarUrl: string })[] = [];
+    const players: (PlayerSnapshot & { userId: string; username: string; avatarUrl: string; inv: MiniGameKind | ''; invAgeMs: number; mg: string })[] = [];
     for (const p of this.players.values()) {
       if (!p.connected) continue;
       players.push({
         id: p.sessionId, userId: p.userId, username: p.username, avatarUrl: p.avatarUrl,
         x: round3(p.x), y: round3(p.y), z: round3(p.z), yaw: round3(p.yaw), speed: round3(p.speed),
         grounded: p.grounded, held: p.held, tool: p.tool, action: p.action,
+        ...this.hub.tags(p.sessionId),
       });
     }
     this.broadcast('state', {
@@ -1098,10 +1938,12 @@ export default class BlocksyRoom extends Room {
       phase: this.phase,
       timeLeftMs: this.endsAt ? Math.max(0, this.endsAt - Date.now()) : 0,
       players,
+      games: this.hub.listing(),
+      acceptDelayMs: this.settings.inviteAcceptDelaySec * 1000,
     });
   }
 
-  private reject(client: Client, x: number, y: number, z: number, reason: ServerMessages['editRejected']['reason']): void {
+  private reject(client: Client, x: number, y: number, z: number, reason: ServerMessages['editRejected']['reason'] | 'busy'): void {
     client.send('editRejected', { x, y, z, id: this.grid.get(x, y, z), reason });
   }
 
@@ -1110,6 +1952,7 @@ export default class BlocksyRoom extends Room {
   private handleMove(client: Client, m: ClientMessages['move']): void {
     const p = this.players.get(client.sessionId);
     if (!p || !isObj(m) || ![m.x, m.y, m.z, m.yaw, m.speed].every(isNum)) return;
+    if (this.hub.locked(client.sessionId)) { p.speed = 0; p.lastMove = Date.now(); return; }
     const now = Date.now();
     const dt = Math.max(0.05, (now - p.lastMove) / 1000);
     p.lastMove = now;
@@ -1134,6 +1977,7 @@ export default class BlocksyRoom extends Room {
     const p = this.players.get(client.sessionId);
     if (!p || !isObj(m) || ![m.x, m.y, m.z, m.id].every(isInt)) return;
     const { x, y, z, id } = m;
+    if (this.hub.locked(client.sessionId)) return this.reject(client, x, y, z, 'busy');
     if (!p.profile.owned.includes(id)) return this.reject(client, x, y, z, 'not_owned');
     if (!this.inReach(p, x, y, z)) return this.reject(client, x, y, z, 'out_of_range');
     const blockers: Aabb[] = [];
@@ -1152,6 +1996,7 @@ export default class BlocksyRoom extends Room {
     const p = this.players.get(client.sessionId);
     if (!p || !isObj(m) || ![m.x, m.y, m.z].every(isInt)) return;
     const { x, y, z } = m;
+    if (this.hub.locked(client.sessionId)) return this.reject(client, x, y, z, 'busy');
     if (!this.inReach(p, x, y, z)) return this.reject(client, x, y, z, 'out_of_range');
     const result = evaluateRemoval(this.grid, x, y, z);
     if (result !== 'ok') return this.reject(client, x, y, z, result);
@@ -1173,7 +2018,7 @@ export default class BlocksyRoom extends Room {
 
   private handleBuy(client: Client, m: ClientMessages['buy']): void {
     const p = this.players.get(client.sessionId);
-    if (!p || !isObj(m) || !isInt(m.id)) return;
+    if (!p || !isObj(m) || !isInt(m.id) || this.hub.locked(client.sessionId)) return;
     const result = purchase(p.profile, m.id);
     client.send('profile', { profile: p.profile, result });
   }

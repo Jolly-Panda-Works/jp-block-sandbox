@@ -12,4 +12,5 @@ export * from './social';
 export * from './economy';
 export * from './textures';
 export * from './mesher';
+export * from './minigames';
 export type * from './protocol';

@@ -2,6 +2,7 @@ import { Client, type Room } from 'colyseus.js';
 import {
   AIR, EMOJIS, PROTOCOL_VERSION, getBlock, sanitizeAppearance, sanitizeProfile,
   type ClientMessages, type JoinOptions, type PlayerMeta, type PlayerSnapshot, type ProfileData, type ServerMessages,
+  type MgLobby, type MgListing, type MgView, type MiniGameKind,
 } from '@jp/blocksy-shared';
 import { useGame } from '../state/store';
 import { world } from '../game/world';
@@ -10,13 +11,23 @@ import { dropAnim, getAnim, playEmote, playSwing } from '../render/animState';
 import { UUID_RE, config } from './config';
 import { getRealtimeCredentials } from './api';
 import { readGameToken, secondsLeft } from './jwt';
+import { releasePointer } from '../game/pointer';
 
 /** Latest replicated transform of a remote player; r* fields are the interpolated render values. */
-export interface RemoteState extends PlayerSnapshot { rx: number; ry: number; rz: number; ryaw: number }
+export interface RemoteState extends PlayerSnapshot {
+  rx: number; ry: number; rz: number; ryaw: number;
+  /** Open mini-game invite (icon above the head) and when it becomes joinable (performance.now seconds). */
+  inv?: MiniGameKind | '';
+  invAgeMs?: number;
+  invReadyAt?: number;
+  /** Mini-game session the player is in or watching. */
+  mg?: string;
+}
+type StatePlayer = PlayerSnapshot & { inv?: MiniGameKind | ''; invAgeMs?: number; mg?: string };
 export const remotes = new Map<string, RemoteState>();
 
 /** Extra fields the Rastaar server adds to every `state` message. */
-type StateMessage = ServerMessages['state'] & { phase?: 'playing' | 'finished'; timeLeftMs?: number };
+type StateMessage = Omit<ServerMessages['state'], 'players'> & { players: StatePlayer[]; phase?: 'playing' | 'finished'; timeLeftMs?: number; games?: MgListing[]; acceptDelayMs?: number };
 
 let client: Client | null = null;
 let room: Room | null = null;
@@ -35,6 +46,7 @@ const REJECT_TEXT: Record<string, string> = {
   out_of_range: 'Too far away',
   not_owned: "You don't own this block yet",
   out_of_bounds: "That's the edge of the world",
+  busy: 'Not while you are in a mini-game',
 };
 
 // ---------------- local profile cache ----------------
@@ -78,7 +90,7 @@ function describe(err: unknown, wsUrl: string): string {
  * 2. Game server: joinOrCreate("blocksy", { jwt, multiplayerId, username, avatarUrl, protocolVersion })
  */
 /** Match/token typed on the join screen take precedence over the URL and build settings. */
-export interface JoinInput { multiplayerId?: string; jwt?: string }
+export interface JoinInput { multiplayerId?: string; jwt?: string; wsUrl?: string }
 
 export async function connect(name: string, input: JoinInput = {}): Promise<void> {
   const set = useGame.setState;
@@ -118,6 +130,7 @@ export async function connect(name: string, input: JoinInput = {}): Promise<void
   set({ multiplayerId });
   try {
     const creds = await getRealtimeCredentials(multiplayerId, directJwt);
+    if (input.wsUrl && /^wss?:\/\//i.test(input.wsUrl)) creds.wsUrl = input.wsUrl;
     wsUrl = creds.wsUrl;
     const options: JoinOptions & { avatarUrl?: string } = {
       jwt: creds.jwt, multiplayerId, username: name, protocolVersion: PROTOCOL_VERSION,
@@ -182,8 +195,14 @@ function attach(r: Room): void {
   // Every player's transform, 10 Hz. Our own entry is skipped: the local player is simulated on this client.
   r.onMessage('state', (m: StateMessage) => {
     const seen = new Set<string>();
+    const nowS = performance.now() / 1000;
+    const delay = typeof m.acceptDelayMs === 'number' ? m.acceptDelayMs : get().acceptDelayMs;
     for (const p of m.players) {
-      if (p.id === r.sessionId) continue;
+      if (p.id === r.sessionId) {
+        const inv = p.inv ?? '';
+        if (inv !== get().myInvite) set({ myInvite: inv });
+        continue;
+      }
       seen.add(p.id);
       const s = remotes.get(p.id);
       if (!s) remotes.set(p.id, { ...p, rx: p.x, ry: p.y, rz: p.z, ryaw: p.yaw });
@@ -191,11 +210,16 @@ function attach(r: Room): void {
         if (p.action !== s.action) playSwing(p.id);
         Object.assign(s, p);
       }
+      const rs = remotes.get(p.id)!;
+      rs.invReadyAt = p.inv ? nowS + Math.max(0, delay - (p.invAgeMs ?? 0)) / 1000 : undefined;
       getAnim(p.id).holding = p.tool === 'destroy' || (p.tool === 'block' && p.held !== AIR && !!getBlock(p.held));
     }
     for (const id of remotes.keys()) if (!seen.has(id)) remotes.delete(id);
     const timeLeftMs = typeof m.timeLeftMs === 'number' ? m.timeLeftMs : 0;
     if (timeLeftMs !== get().timeLeftMs) set({ timeLeftMs });
+    const games = m.games ?? [];
+    if (JSON.stringify(games) !== JSON.stringify(get().games)) set({ games });
+    if (delay !== get().acceptDelayMs) set({ acceptDelayMs: delay });
   });
   r.onMessage('playerMeta', (m: ServerMessages['playerMeta']) => setMeta(m, r.sessionId));
   r.onMessage('playerLeft', (m: ServerMessages['playerLeft']) => {
@@ -223,7 +247,23 @@ function attach(r: Room): void {
     if (e) get().showBubble(m.sessionId, { emoji: e.char }, 3.5);
   });
   r.onMessage('emote', (m: ServerMessages['emote']) => playEmote(m.sessionId, m.id));
-  r.onMessage('teleport', (m: ServerMessages['teleport']) => teleportLocal(m.x, m.y, m.z));
+  r.onMessage('teleport', (m: ServerMessages['teleport'] & { yaw?: number }) => teleportLocal(m.x, m.y, m.z, m.yaw));
+
+  // ---- mini-games ----
+  r.onMessage('mg', (m: MgView) => {
+    if (!get().mg) { releasePointer(); set({ tool: 'none', panel: 'none' }); }
+    set({ mg: m, mgAt: performance.now() });
+  });
+  r.onMessage('mgEnded', (m: { id: string }) => { if (get().mg?.id === m.id) set({ mg: null }); });
+  r.onMessage('mgLobby', (m: MgLobby | null) => {
+    const prev = get().lobby;
+    set({ lobby: m });
+    if (m && prev && m.members.length > prev.members.length && m.hostId === r.sessionId) {
+      get().showToast(`${m.members[m.members.length - 1].name} joined your Ludo table — press P to start`);
+    }
+    if (m && m.hostId !== r.sessionId && !prev) { releasePointer(); set({ tool: 'none', panel: 'none' }); }
+  });
+  r.onMessage('mgError', (m: { message: string }) => get().showToast(m.message));
   r.onMessage('sessionEnded', () => {
     sessionEnded = true;
     set({ sessionEnded: true, timeLeftMs: 0, panel: 'none' });

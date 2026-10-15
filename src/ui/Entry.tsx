@@ -2,11 +2,11 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { GAME_NAME, ISLAND_NAME, MAX_NAME_LENGTH, sanitizeName } from '@jp/blocksy-shared';
 import { asset } from '../assets';
 import { connect } from '../net/network';
-import { UUID_RE, config, inviteLink, parseMatchInput } from '../net/config';
+import { UUID_RE, config, inviteLink, parseMatchInput, parsePastedToken } from '../net/config';
 import { ApiError, MAX_ROOM_PLAYERS, isFull, platform, type RoomInfo, type UserInfo } from '../net/platform';
 import { useGame } from '../state/store';
 
-type Step = 'checking' | 'login' | 'lobby' | 'direct';
+type Step = 'checking' | 'login' | 'lobby' | 'direct' | 'test';
 
 /**
  * Everything before the game starts:
@@ -20,7 +20,8 @@ export function Entry() {
 
   useEffect(() => {
     if (step !== 'checking') return;
-    if (!platform.configured() || !platform.hasSession()) { setStep('login'); return; }
+    if (!platform.configured()) { setStep('test'); return; }
+    if (!platform.hasSession()) { setStep('login'); return; }
     platform.me()
       .then((u) => { setUser(u); setStep('lobby'); })
       .catch(() => setStep('login'));
@@ -35,6 +36,7 @@ export function Entry() {
         </div>
         {step === 'checking' && <p>Connecting…</p>}
         {step === 'direct' && <Direct />}
+        {step === 'test' && <TestToken />}
         {step === 'login' && <Login onDone={(u) => { setUser(u); setStep('lobby'); }} />}
         {step === 'lobby' && <Lobby user={user} onSignOut={() => { platform.signOut(); setUser(null); setStep('login'); }} />}
       </div>
@@ -72,6 +74,59 @@ function Direct() {
   );
 }
 
+/** Snippet that the dashboard page runs to mint a playground token for this game (as in the Rastaar docs). */
+const playgroundSnippet = (gameKey: string) => `copy(JSON.stringify(await (await fetch("/dashboard/api/playground/token", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ gameKey: "${gameKey}" }),
+})).json()))`;
+
+/**
+ * Test mode (no backend configured): the player gets a short-lived token from the dashboard playground
+ * and pastes it here. Every player needs their own fresh token.
+ */
+function TestToken() {
+  const phase = useGame((s) => s.phase);
+  const [name, setName] = useName('');
+  const [pasted, setPasted] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState('');
+  const snippet = playgroundSnippet(config.roomName);
+
+  const copySnippet = async () => {
+    try { await navigator.clipboard.writeText(snippet); setCopied(true); } catch { window.prompt('Copy this snippet', snippet); }
+  };
+  const join = (e: FormEvent) => {
+    e.preventDefault();
+    const t = parsePastedToken(pasted);
+    if (t.error || !t.jwt) { setError(t.error || 'Paste a token first.'); return; }
+    setError('');
+    void connect(sanitizeName(name), { jwt: t.jwt, multiplayerId: t.multiplayerId || undefined, wsUrl: t.wsUrl || undefined });
+  };
+
+  return (
+    <form className="entry-form" onSubmit={join}>
+      <p>Test mode: join with a token from the Rastaar dashboard playground.</p>
+      <ol className="steps">
+        <li>Open <a href="https://gameserver.rastar.ir/dashboard" target="_blank" rel="noreferrer">the dashboard</a> in another tab and sign in.</li>
+        <li>In <b>that tab</b>, press F12 → Console (context: <code>top</code>), paste the snippet below and press Enter. The token is copied.</li>
+        <li>Come back here, paste it below and press Join. Each player needs a <b>new</b> token.</li>
+      </ol>
+      <div className="snippet">
+        <pre dir="ltr">{snippet}</pre>
+        <button type="button" onClick={() => void copySnippet()}>{copied ? 'Copied ✓' : 'Copy snippet'}</button>
+      </div>
+      <NameField value={name} onChange={setName} />
+      <textarea value={pasted} onChange={(e) => { setPasted(e.target.value); setError(''); }} rows={3} dir="ltr" spellCheck={false}
+        placeholder='Paste the token here ({"jwt": …} or eyJ…)' />
+      <button className="primary" disabled={phase === 'connecting' || !pasted.trim()}>{phase === 'connecting' ? 'Joining…' : 'Join'}</button>
+      {error && <div className="error">{error}</div>}
+      <ErrorLine />
+      <small>Tokens are short-lived — if joining fails with an expiry error, get a fresh one.</small>
+    </form>
+  );
+}
+
 function Login({ onDone }: { onDone: (u: UserInfo | null) => void }) {
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
@@ -83,7 +138,7 @@ function Login({ onDone }: { onDone: (u: UserInfo | null) => void }) {
     return (
       <div className="entry-form">
         <p>This copy of Blocksy is not connected to the Rastaar backend yet.</p>
-        <small>Set <code>VITE_API_BASE_URL</code> when building, or open the game from the Rastaar app.</small>
+        <small>Use a playground test token, set <code>VITE_API_BASE_URL</code> when building, or open the game from the Rastaar app.</small>
       </div>
     );
   }

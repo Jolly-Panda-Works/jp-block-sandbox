@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import {
-  AIR, EYE_HEIGHT, PLAYER_HEIGHT, PLAYER_RADIUS, REACH, RESPAWN_BELOW_Y, evaluatePlacement, evaluateRemoval, getBlock,
-  isSolidAt, moveBody, playerAabb, resolvePlacementCell, sleeveLength, voxelRaycast, withinReach, type StallInfo,
+  ACCEPT_RADIUS, SPECTATE_RADIUS, AIR, EYE_HEIGHT, PLAYER_HEIGHT, PLAYER_RADIUS, REACH, RESPAWN_BELOW_Y, evaluatePlacement, evaluateRemoval, getBlock,
+  isSolidAt, moveBody, type MiniGameKind, playerAabb, resolvePlacementCell, sleeveLength, voxelRaycast, withinReach, type StallInfo,
 } from '@jp/blocksy-shared';
 import { consumeInput } from './input';
 import { localBody, teleportLocal } from './localState';
@@ -11,7 +11,7 @@ import { world } from './world';
 import { remotes, send } from '../net/network';
 import { useGame, selectedBlock } from '../state/store';
 import { Avatar } from '../render/Avatar';
-import { getAnim, now, playSwing } from '../render/animState';
+import { applyGamePose, getAnim, now, playSwing } from '../render/animState';
 import { getBlockGeometry, getBlockMaterials } from '../render/textures';
 import { Hammer } from '../render/Hammer';
 
@@ -58,7 +58,7 @@ export function LocalPlayer() {
   const armInner = useRef<THREE.Group>(null);
   const st = useRef({
     blend: 1, camDist: TP_DISTANCE, lastGround: -9, lastJump: -9, nextRepeat: 0, sendAt: 0, bodyYaw: 0,
-    faceAimUntil: 0, nearby: null as StallInfo | null, hidden: false, layerKey: '', lastLook: null as unknown, armSwing: -9, bob: 0,
+    faceAimUntil: 0, nearKey: '', nearby: null as StallInfo | null, hidden: false, layerKey: '', lastLook: null as unknown, armSwing: -9, bob: 0,
   });
 
   useEffect(() => { camera.layers.disable(1); }, [camera]);
@@ -69,31 +69,35 @@ export function LocalPlayer() {
     const dt = Math.min(rawDt, 0.05), t = now(), s = st.current, b = localBody;
     const game = useGame.getState();
     const active = game.panel === 'none' && !game.sessionEnded && !game.reconnecting && (game.pointerLocked || game.touch);
+    // In a mini-game (playing, watching or waiting in a lobby) you may only look around.
+    const inMg = !!game.mg || (!!game.lobby && game.lobby.hostId !== sessionId);
+    const canLook = game.panel === 'none' && !game.sessionEnded && !game.reconnecting && (game.pointerLocked || game.touch || inMg);
+    const canAct = active && !inMg;
     const inp = consumeInput();
 
     // ---- look (mouse delta is per frame: never multiplied by dt) ----
-    if (active) {
+    if (canLook) {
       b.yaw -= inp.lookX * LOOK_SPEED * game.sensitivity;
       b.pitch += inp.lookY * LOOK_SPEED * game.sensitivity * (game.invertY ? -1 : 1);
-      if (inp.wheel && game.tool !== 'none') game.cycleSlot(inp.wheel);
+      if (inp.wheel && game.tool !== 'none' && !inMg) game.cycleSlot(inp.wheel);
     }
     s.blend = clamp(s.blend + Math.sign((game.cameraMode === 'third' ? 1 : 0) - s.blend) * (dt / TRANSITION), 0, 1);
     const smooth = s.blend * s.blend * (3 - 2 * s.blend);
     b.pitch = clamp(b.pitch, lerp(-1.48, -0.8, smooth), lerp(1.48, 1.3, smooth));
 
     // ---- movement ----
-    let mx = active ? inp.moveX : 0, my = active ? inp.moveY : 0;
+    let mx = canAct ? inp.moveX : 0, my = canAct ? inp.moveY : 0;
     const ml = Math.hypot(mx, my);
     if (ml > 1) { mx /= ml; my /= ml; }
     const fx = Math.sin(b.yaw), fz = Math.cos(b.yaw), rx = -Math.cos(b.yaw), rz = Math.sin(b.yaw);
-    const speed = active && inp.sprint ? SPRINT : WALK;
+    const speed = canAct && inp.sprint ? SPRINT : WALK;
     const wx = (fx * my + rx * mx) * speed, wz = (fz * my + rz * mx) * speed;
     const accel = (b.grounded ? ACCEL_GROUND : ACCEL_AIR) * dt;
     const dvx = wx - b.vx, dvz = wz - b.vz, dl = Math.hypot(dvx, dvz);
     if (dl <= accel) { b.vx = wx; b.vz = wz; } else { b.vx += (dvx / dl) * accel; b.vz += (dvz / dl) * accel; }
 
     if (b.grounded) s.lastGround = t;
-    if (active && inp.jump) s.lastJump = t;
+    if (canAct && inp.jump) s.lastJump = t;
     if (t - s.lastGround <= COYOTE && t - s.lastJump <= JUMP_BUFFER) {
       b.vy = JUMP_VELOCITY;
       s.lastGround = s.lastJump = -9; // consume both: no double jumps
@@ -129,11 +133,13 @@ export function LocalPlayer() {
     let targetYaw = s.bodyYaw;
     if (fp || t < s.faceAimUntil) targetYaw = b.yaw;
     else if (hs > 0.2) targetYaw = Math.atan2(b.vx, b.vz);
+    if (game.mg?.role === 'player' && game.mg.seatYaw !== undefined) targetYaw = game.mg.seatYaw; // face the table / opponent
     const diff = Math.atan2(Math.sin(targetYaw - s.bodyYaw), Math.cos(targetYaw - s.bodyYaw));
     s.bodyYaw += fp ? diff : clamp(diff, -12 * dt, 12 * dt);
     anim.speed = hs / WALK;
     anim.grounded = b.grounded;
-    anim.holding = game.tool !== 'none';
+    anim.holding = game.tool !== 'none' && !inMg;
+    applyGamePose(sessionId, anim, game.games);
     if (avatar.current) {
       avatar.current.position.set(b.x, b.y, b.z);
       avatar.current.rotation.set(0, s.bodyYaw, 0);
@@ -153,7 +159,7 @@ export function LocalPlayer() {
       (x, y, z) => !!getBlock(g.get(x, y, z))?.targetable);
     const minAlong = eye.clone().sub(origin).dot(dir) - 0.5; // ignore blocks between a third-person camera and the player
     const building = game.tool !== 'none';
-    const valid = active && building && hit.hit && hit.distance >= minAlong && withinReach(eye.x, eye.y, eye.z, hit.x, hit.y, hit.z, REACH);
+    const valid = canAct && building && hit.hit && hit.distance >= minAlong && withinReach(eye.x, eye.y, eye.z, hit.x, hit.y, hit.z, REACH);
     const blockers = [playerAabb(b.x, b.y, b.z), ...[...remotes.values()].map((r) => playerAabb(r.x, r.y, r.z))];
     let place: [number, number, number] | null = null;
     if (valid && game.tool === 'block') {
@@ -164,7 +170,7 @@ export function LocalPlayer() {
     if (ghost.current) { ghost.current.visible = !!place; if (place) ghost.current.position.set(place[0] + 0.5, place[1] + 0.5, place[2] + 0.5); }
 
     // One button, one action: left click uses whatever is in hand (block → place, hammer → destroy).
-    if (active && building) {
+    if (canAct && building) {
       if (!inp.primaryHeld) s.nextRepeat = 0;
       const use = inp.primaryPressed || (inp.primaryHeld && t >= s.nextRepeat);
       const explicit = inp.primaryPressed;
@@ -196,7 +202,7 @@ export function LocalPlayer() {
     if (arm.current && armInner.current) {
       arm.current.position.copy(camera.position);
       arm.current.quaternion.copy(camera.quaternion);
-      arm.current.visible = s.blend < 0.02 && game.tool !== 'none'; // hands empty: no arm in view
+      arm.current.visible = s.blend < 0.02 && game.tool !== 'none' && !inMg; // hands empty: no arm in view
       s.bob += dt * 9 * (b.grounded ? Math.min(1, hs / WALK) : 0);
       const sw = (t - s.armSwing) / 0.25, swing = sw >= 0 && sw < 1 ? Math.sin(sw * Math.PI) : 0;
       const amp = Math.min(1, hs / WALK) * 0.018;
@@ -206,7 +212,7 @@ export function LocalPlayer() {
 
     // ---- shops, networking ----
     let nearby: StallInfo | null = null;
-    if (game.layout && active) {
+    if (game.layout && canAct) {
       let best = STALL_RADIUS * STALL_RADIUS;
       for (const st2 of game.layout.stalls) {
         const d = (st2.interact.x - b.x) ** 2 + (st2.interact.z - b.z) ** 2 + ((st2.interact.y - b.y) ** 2) * 0.25;
@@ -214,6 +220,28 @@ export function LocalPlayer() {
       }
     }
     if (nearby !== s.nearby) { s.nearby = nearby; useGame.setState({ nearbyStall: nearby }); }
+
+    // Nearest joinable invite and nearest running game (for the E prompt).
+    let nearInvite: { hostId: string; name: string; kind: MiniGameKind; waitMs: number } | null = null;
+    let nearGame: { id: string; kind: MiniGameKind } | null = null;
+    if (canAct) {
+      let best = ACCEPT_RADIUS * ACCEPT_RADIUS;
+      for (const [id, r] of remotes) {
+        if (!r.inv) continue;
+        const d = (r.x - b.x) ** 2 + (r.z - b.z) ** 2;
+        if (d > best) continue;
+        best = d;
+        nearInvite = { hostId: id, name: game.players[id]?.name ?? 'Player', kind: r.inv, waitMs: Math.max(0, ((r.invReadyAt ?? 0) - t) * 1000) };
+      }
+      let bestG = SPECTATE_RADIUS * SPECTATE_RADIUS;
+      for (const g of game.games) {
+        if (g.phase === 'over' || g.seats.some((x) => x.id === sessionId)) continue;
+        const d = (g.x - b.x) ** 2 + (g.z - b.z) ** 2;
+        if (d <= bestG) { bestG = d; nearGame = { id: g.id, kind: g.kind }; }
+      }
+    }
+    const nearKey = `${nearInvite?.hostId ?? ''}:${nearInvite ? Math.ceil(nearInvite.waitMs / 1000) : ''}|${nearGame?.id ?? ''}`;
+    if (nearKey !== s.nearKey) { s.nearKey = nearKey; useGame.setState({ nearInvite, nearGame }); }
 
     if (t >= s.sendAt) {
       s.sendAt = t + SEND_INTERVAL;

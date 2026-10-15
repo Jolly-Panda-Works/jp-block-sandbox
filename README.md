@@ -4,7 +4,27 @@
 
 Browser game built with React Three Fiber. It connects to the **Blocksy game server**, which lives in its own repository (`blocksy-server`), through the platform API.
 
-## How players get in
+## Test mode (no backend needed): playground tokens
+
+When the site is built without `VITE_API_BASE_URL`, which is the case on GitHub Pages today, the join screen asks for a **playground test token**. This is the same method as the platform's Ping Pong sample:
+
+1. Open `https://gameserver.rastar.ir/dashboard` in another tab and sign in.
+2. In **that** tab, press F12 to open the Console. Set the context to `top`, then click **Copy snippet** on the game's join screen, paste it and press Enter. The token is copied:
+   ```js
+   copy(JSON.stringify(await (await fetch("/dashboard/api/playground/token", {
+     method: "POST", headers: { "Content-Type": "application/json" },
+     body: JSON.stringify({ gameKey: "blocksy" }),
+   })).json()))
+   ```
+3. Paste it into the game, enter a name, and press **Join**.
+
+Notes:
+
+- Every player needs a **new** token, and tokens are short-lived.
+- Both players must have tokens with the same `multiplayerId` to share a room.
+- The game also accepts a bare JWT or a link with `?jwt=`.
+
+## How players get in (with the backend configured)
 
 1. **Sign in on the website:** phone number, then the one-time code (a Rastaar account).
 2. **Lobby:**
@@ -66,6 +86,31 @@ The local mode is development-only and is never active in a production build.
 
 Env variables are baked in at build time.
 
+## Popup games (mini-games)
+
+Press **P** (or the 🎲 Games button) and pick a game. Its icon floats above your head. A player standing next to you (within 3.5 m) can press **E** to join; joining opens 5 seconds after the invite was posted (`inviteAcceptDelaySec`).
+
+| Game | Players | Rules (server-authoritative) | Time per action → if it runs out |
+|---|---|---|---|
+| ✊ Rock Paper Scissors | 2 | Best of 3 (first to 2), ties replay. Both pick at once; the opponent's pick stays hidden until the reveal, then each character holds their item. | 3 s → random pick |
+| ❌ Tic Tac Toe | 2 | Host is X and starts. Three in a row wins; a full board is a draw. | 15 s → random free cell |
+| ♟️ Chess | 2 | Host is white. Full rules: castling, en passant, promotion (auto-queen), check, checkmate, stalemate, 50-move rule, insufficient material. | 60 s → random legal move |
+| 🎲 Ludo | 2–4 | Guests join the host's table (up to 4). The host starts once at least 2 are seated. You need a 6 to leave base, and a 6 rolls again. Landing on an opponent sends them home, except on start and ★ squares. Finishing needs the exact count; first with all 4 tokens home wins. | 10 s → auto roll / random token |
+
+How a session works:
+
+- **Board games:** a table with stools appears between the players, everyone sits facing the board, and the board panel opens for every player.
+- **Rock Paper Scissors:** the two players stand face to face and pump their fists while choosing.
+- **Spectators:** other players walking up to a running game (within 7 m) get **E — Watch**. They see the board in real time and can leave whenever they like.
+- **Locks:** players, spectators and Ludo guests waiting in a lobby can't walk, build or use the shop; they can only look around. Use the mouse (drag) or touch to look.
+  - Spectators: chat, emoji and emotes all work.
+  - Players: chat and emoji work; emotes are disabled.
+- **Leaving:** anyone can leave at any time.
+  - In a 2-player game, the other player wins.
+  - In Ludo, the leaver's tokens are removed. The game continues while 2 or more players remain.
+
+Timings are Custom settings: `inviteAcceptDelaySec`, `rpsPickSec`, `rpsBestOf`, `tttTurnSec`, `chessTurnSec` and `ludoTurnSec`. Locally they come from `dev-server/settings.json`.
+
 ## Controls
 
 **Desktop:**
@@ -81,6 +126,8 @@ Env variables are baked in at build time.
 | Camera | V |
 | Interact | E |
 | Shop / Style / Social | B / C / G |
+| Popup games (invite) / accept or watch | P / E |
+| Rock Paper Scissors pick | 1 / 2 / 3 or click |
 | Hints / Menu | H / Esc |
 
 **Small screens:** touch controls (joystick, drag-to-look, Jump, Use) replace the keyboard automatically.

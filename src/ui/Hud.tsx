@@ -5,7 +5,23 @@ import { useGame } from '../state/store';
 import { getIconUrl } from '../render/textures';
 import { now } from '../render/animState';
 import { lockPointer, togglePanel } from '../game/pointer';
-import { TouchControls } from './TouchControls';
+import { LookArea, TouchControls } from './TouchControls';
+import { MiniGameOverlay } from './MiniGameOverlay';
+import { send } from '../net/network';
+import { miniGameInfo } from '@jp/blocksy-shared';
+
+/** E near an invite → accept (after the delay); near a running game → watch. Returns true if handled. */
+export function interactMiniGame(): boolean {
+  const s = useGame.getState();
+  if (s.mg || s.lobby) return true;
+  if (s.nearInvite) {
+    if (s.nearInvite.waitMs > 0) s.showToast(`You can join in ${Math.ceil(s.nearInvite.waitMs / 1000)} s`);
+    else send('mgAccept', { hostId: s.nearInvite.hostId });
+    return true;
+  }
+  if (s.nearGame) { send('mgSpectate', { gameId: s.nearGame.id }); return true; }
+  return false;
+}
 
 export function Keycap({ k }: { k: string }) { return <span className="keycap">{k}</span>; }
 
@@ -21,7 +37,9 @@ export function Hud() {
   const playing = s.panel === 'none';
   return (
     <div className="hud">
+      {(s.mg || (s.lobby && s.lobby.hostId !== s.sessionId)) && !s.touch && <LookArea />}
       {s.touch && playing && <TouchControls />}
+      <MiniGameOverlay />
       {s.timeLeftMs > 0 && <div className="card session-timer">⏱ {formatTime(s.timeLeftMs)}</div>}
       {s.reconnecting && <div className="card reconnecting">Connection lost — reconnecting…</div>}
       {s.sessionEnded && (
@@ -39,6 +57,7 @@ export function Hud() {
         <div><div className="title">{ISLAND_NAME}</div><div className="sub">👥 {count} / {MAX_PLAYERS} players</div></div>
       </div>
       <div className="top-buttons">
+        <button onClick={() => togglePanel('games')}>🎲 Games <Keycap k="P" /></button>
         <button onClick={() => togglePanel('build')}>🔨 Build <Keycap k="T" /></button>
         <button onClick={() => togglePanel('social')}>😊 Social <Keycap k="G" /></button>
         <button onClick={() => togglePanel('customize')}>👕 Style <Keycap k="C" /></button>
@@ -47,8 +66,18 @@ export function Hud() {
       </div>
       {playing && s.pointerLocked && <div className="crosshair" />}
       {playing && s.touch && <div className="crosshair" />}
-      {playing && !s.touch && !s.pointerLocked && <div className="click-to-play" onClick={lockPointer}>Click to play</div>}
-      {s.nearbyStall && playing && !s.touch && <div className="card prompt"><Keycap k="E" /> Open {s.nearbyStall.title} shop</div>}
+      {playing && !s.mg && !s.lobby && !s.touch && !s.pointerLocked && <div className="click-to-play" onClick={lockPointer}>Click to play</div>}
+      {playing && !s.mg && s.nearInvite && (
+        <button className="card prompt mg-prompt" onClick={() => interactMiniGame()}>
+          <Keycap k="E" /> {miniGameInfo(s.nearInvite.kind).icon} {s.nearInvite.waitMs > 0 ? `${miniGameInfo(s.nearInvite.kind).name} with ${s.nearInvite.name} — in ${Math.ceil(s.nearInvite.waitMs / 1000)} s` : `Play ${miniGameInfo(s.nearInvite.kind).name} with ${s.nearInvite.name}`}
+        </button>
+      )}
+      {playing && !s.mg && !s.nearInvite && s.nearGame && (
+        <button className="card prompt mg-prompt" onClick={() => interactMiniGame()}>
+          <Keycap k="E" /> 👁 Watch {miniGameInfo(s.nearGame.kind).name}
+        </button>
+      )}
+      {s.nearbyStall && playing && !s.touch && !s.nearInvite && !s.nearGame && <div className="card prompt"><Keycap k="E" /> Open {s.nearbyStall.title} shop</div>}
       <SelfBubble />
       <Toast />
       {s.showHints && !s.touch && (
@@ -61,6 +90,7 @@ export function Hud() {
           <span><Keycap k="T" /> Choose blocks</span>
           <span><Keycap k="V" /> Camera</span>
           <span><Keycap k="E" /> Interact</span>
+          <span><Keycap k="P" /> Games</span>
           <span><Keycap k="H" /> Hide</span>
         </div>
       )}

@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { EMOJIS, EMOTES, MAX_MESSAGE_LENGTH, PRESET_MESSAGES, sanitizeMessage } from '@jp/blocksy-shared';
 import { send } from '../net/network';
+import { useGame } from '../state/store';
 import { openPanel } from '../game/pointer';
 
 type Tab = 'emojis' | 'messages' | 'emotes';
 
 /** Social panel (reference images 9–11): emoji and text bubbles above your head, and animated emotes. */
 export function SocialPanel() {
+  const seated = useGame((s) => s.mg?.role === 'player');
   const [tab, setTab] = useState<Tab>('emojis');
   const [text, setText] = useState('');
   const sendText = (t: string) => {
@@ -46,7 +48,7 @@ export function SocialPanel() {
           {tab === 'emotes' && (
             <div className="emotes">
               {EMOTES.map((e) => (
-                <button key={e.id} onClick={() => { send('emote', { id: e.id }); openPanel('none'); }}>
+                <button key={e.id} disabled={seated} title={seated ? 'Emotes are off while you play' : ''} onClick={() => { send('emote', { id: e.id }); openPanel('none'); }}>
                   <span className="big">{e.icon}</span>{e.label}
                 </button>
               ))}

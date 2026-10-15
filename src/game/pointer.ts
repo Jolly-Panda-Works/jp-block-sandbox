@@ -36,4 +36,10 @@ export function openPanel(panel: Panel): void {
   else suppressPause = false;
 }
 
+/** Frees the cursor for a mini-game board without opening the pause menu. */
+export function releasePointer(): void {
+  clearHeld();
+  if (document.pointerLockElement) { suppressPause = true; document.exitPointerLock(); }
+}
+
 export const togglePanel = (panel: Panel): void => openPanel(useGame.getState().panel === panel ? 'none' : panel);
