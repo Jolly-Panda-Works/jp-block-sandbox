@@ -1,4 +1,6 @@
+import { asset } from '../assets';
 import { useGame } from '../state/store';
+import { inviteLink } from '../net/config';
 import { openPanel } from '../game/pointer';
 import { Keycap } from './Hud';
 
@@ -10,11 +12,15 @@ const CONTROLS: [string, string][] = [
 ];
 
 export function PauseMenu() {
-  const { sensitivity, invertY } = useGame();
+  const { sensitivity, invertY, multiplayerId, showToast } = useGame();
+  const invite = async () => {
+    const link = inviteLink(multiplayerId);
+    try { await navigator.clipboard.writeText(link); showToast('Invite link copied'); } catch { window.prompt('Invite link', link); }
+  };
   return (
     <div className="overlay">
       <div className="card panel pause">
-        <header><img className="menu-logo" src="/blocksy-logo-light.png" alt="Blocksy" /><h2>Menu</h2></header>
+        <header><img className="menu-logo" src={asset("blocksy-logo-light.png")} alt="Blocksy" /><h2>Menu</h2></header>
         <button className="primary wide" onClick={() => openPanel('none')}>Resume</button>
         <div className="pause-row">
           <button onClick={() => openPanel('shop')}>🧱 Shop</button>
@@ -22,6 +28,7 @@ export function PauseMenu() {
           <button onClick={() => openPanel('build')}>🔨 Build</button>
           <button onClick={() => openPanel('social')}>😊 Social</button>
         </div>
+        {multiplayerId && <button className="wide" onClick={invite}>🔗 Copy invite link</button>}
         <div className="setting">
           <span>Mouse sensitivity</span>
           <button onClick={() => useGame.setState({ sensitivity: Math.max(0.2, +(sensitivity - 0.1).toFixed(1)) })}>−</button>

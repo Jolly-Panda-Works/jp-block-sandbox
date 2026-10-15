@@ -20,17 +20,16 @@ function localDevId(): string {
 /** Bearer token for the backend: from ?token=... (stored for next time) or localStorage. */
 function bearerToken(): string | null {
   try {
-    const q = new URLSearchParams(location.search).get('token');
-    if (q) localStorage.setItem('blocksy.authToken', q);
-    return q ?? localStorage.getItem('blocksy.authToken');
+    if (config.userToken) localStorage.setItem('blocksy.authToken', config.userToken);
+    return config.userToken || localStorage.getItem('blocksy.authToken');
   } catch {
-    return null;
+    return config.userToken || null;
   }
 }
 
 /**
  * Asks the platform backend for a realtime token:
- *   POST {apiBaseUrl}/client/realtime/token  { multiplayerId }  →  { wsUrl, jwt }
+ *   POST {apiBaseUrl}/api/v1/client/realtime/token  { multiplayerId }  →  { wsUrl, jwt, expiresAt }   (maybe inside { code, data })
  * Also accepts `{ data: { … } }` envelopes and `token`/`accessToken` instead of `jwt`.
  * A token passed in the page URL (?jwt=…) is used directly.
  */
@@ -38,7 +37,7 @@ export async function getRealtimeCredentials(multiplayerId: string): Promise<Rea
   if (config.jwt) return { wsUrl: config.wsUrl, jwt: config.jwt };
   if (!config.apiBaseUrl && config.localDev) return { wsUrl: config.wsUrl, jwt: `dev:${localDevId()}` };
   if (!config.apiBaseUrl) {
-    throw new Error('No realtime token: set VITE_API_BASE_URL (Rastaar backend) or open the game with ?jwt=… from the platform.');
+    throw new Error('No game token. Open Blocksy from the Rastaar app (or a link with ?jwt=…), or configure VITE_API_BASE_URL.');
   }
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' };

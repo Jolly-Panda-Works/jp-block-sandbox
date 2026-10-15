@@ -7,7 +7,7 @@ import { useGame } from '../state/store';
 import { world } from '../game/world';
 import { teleportLocal } from '../game/localState';
 import { dropAnim, getAnim, playEmote, playSwing } from '../render/animState';
-import { config } from './config';
+import { UUID_RE, config } from './config';
 import { getRealtimeCredentials } from './api';
 
 /** Latest replicated transform of a remote player; r* fields are the interpolated render values. */
@@ -81,8 +81,14 @@ export async function connect(name: string): Promise<void> {
   set({ phase: 'connecting', error: null, name, sessionEnded: false, timeLeftMs: 0 });
   try { localStorage.setItem('jp.sandbox.name', name); } catch { /* private mode */ }
   sessionEnded = false;
-  const multiplayerId = sanitizeMultiplayerId(config.multiplayerId, DEFAULT_MULTIPLAYER_ID);
+  // The platform's JWT carries the match id ("mid", a UUID); the local dev server accepts any id.
+  const multiplayerId = config.localDev ? sanitizeMultiplayerId(config.multiplayerId, DEFAULT_MULTIPLAYER_ID) : config.multiplayerId;
   let wsUrl = config.wsUrl;
+  if (!config.localDev && !UUID_RE.test(multiplayerId)) {
+    set({ phase: 'error', error: 'No match selected. Open Blocksy from the Rastaar app, or use an invite link (…?multiplayerId=<match id>).' });
+    return;
+  }
+  set({ multiplayerId });
   try {
     const creds = await getRealtimeCredentials(multiplayerId);
     wsUrl = creds.wsUrl;

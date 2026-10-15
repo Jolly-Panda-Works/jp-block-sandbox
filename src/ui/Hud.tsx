@@ -1,3 +1,4 @@
+import { asset } from '../assets';
 import { useEffect, useState } from 'react';
 import { AIR, HOTBAR_SLOTS, ISLAND_NAME, MAX_PLAYERS, getBlock } from '@jp/blocksy-shared';
 import { useGame } from '../state/store';
@@ -26,7 +27,7 @@ export function Hud() {
       {s.sessionEnded && (
         <div className="session-ended">
           <div className="card panel">
-            <img src="/blocksy-icon.png" alt="" />
+            <img src={asset("blocksy-icon.png")} alt="" />
             <h2>Session ended</h2>
             <p>Thanks for building on Sunny Isle!</p>
             <button className="primary wide" onClick={() => location.reload()}>Play again</button>
@@ -34,7 +35,7 @@ export function Hud() {
         </div>
       )}
       <div className="card island">
-        <img className="badge" src="/blocksy-icon.png" alt="Blocksy" />
+        <img className="badge" src={asset("blocksy-icon.png")} alt="Blocksy" />
         <div><div className="title">{ISLAND_NAME}</div><div className="sub">👥 {count} / {MAX_PLAYERS} players</div></div>
       </div>
       <div className="top-buttons">

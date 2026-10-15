@@ -802,7 +802,7 @@ function readSettings(roomName: string): BlocksySettings {
     typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : def;
   return {
     worldSeed: int(raw.worldSeed, 1337, 1, 2_147_483_647),
-    sessionMinutes: int(raw.sessionMinutes, 0, 0, 240),
+    sessionMinutes: int(raw.sessionMinutes, 0, 0, 240), // fallback only; Round duration (backend) wins
     editsPerSecond: int(raw.editsPerSecond, 12, 1, 30),
     chatEnabled: typeof raw.chatEnabled === 'boolean' ? raw.chatEnabled : true,
   };
@@ -894,10 +894,7 @@ export default class BlocksyRoom extends Room {
     this.layout = generateIsland(this.grid, this.settings.worldSeed);
     this.startedAt = Date.now();
     this.stateTimer = this.clock.setInterval(() => this.broadcastState(), STATE_INTERVAL_MS);
-    if (this.settings.sessionMinutes > 0) {
-      this.endsAt = this.startedAt + this.settings.sessionMinutes * 60_000;
-      this.sessionTimer = this.clock.setTimeout(() => { void this.finish('time'); }, this.settings.sessionMinutes * 60_000);
-    }
+    // The session timer starts after the first join, once the match config is known (see startSessionTimer).
 
     this.onMessage('move', (c: Client, m: ClientMessages['move']) => { if (this.guard(c, 'move')) this.handleMove(c, m); });
     this.onMessage('place', (c: Client, m: ClientMessages['place']) => { if (this.guard(c, 'place')) this.handlePlace(c, m); });
@@ -919,7 +916,8 @@ export default class BlocksyRoom extends Room {
   }
 
   async onAuth(_client: Client, options: Partial<JoinOptions> & Record<string, unknown>): Promise<JoinAuth> {
-    if (options?.protocolVersion !== PROTOCOL_VERSION) {
+    // Our client always sends protocolVersion; dashboard Playground players may not, so only a *different* version is refused.
+    if (options?.protocolVersion !== undefined && options.protocolVersion !== PROTOCOL_VERSION) {
       throw new Error(`Game version mismatch (client ${String(options?.protocolVersion)}, server ${PROTOCOL_VERSION}). Please reload the game.`);
     }
     return await authorizeJoin(options);
@@ -927,9 +925,16 @@ export default class BlocksyRoom extends Room {
 
   async onJoin(client: Client, options: Partial<JoinOptions> & Record<string, unknown>, auth: JoinAuth): Promise<void> {
     if (!this.configPromise) {
+      this.multiplayerId = auth.multiplayerId; // = JWT "mid", the backend's match id
       this.configPromise = fetchRoomConfig(auth.multiplayerId, this.roomName)
-        .then((cfg) => { if (isInt(cfg?.maxPlayers) && cfg.maxPlayers > 0) this.maxClients = Math.min(cfg.maxPlayers, MAX_PLAYERS); })
-        .catch((err: unknown) => { console.warn('[blocksy] fetchRoomConfig failed, using defaults', err); });
+        .then((cfg) => {
+          if (isInt(cfg?.maxPlayers) && cfg.maxPlayers > 0) this.maxClients = Math.min(cfg.maxPlayers, MAX_PLAYERS);
+          this.startSessionTimer(isNum(cfg?.durationMs) ? cfg.durationMs : 0);
+        })
+        .catch((err: unknown) => {
+          console.warn('[blocksy] fetchRoomConfig failed, using defaults', err);
+          this.startSessionTimer(0);
+        });
     }
     await this.configPromise;
     if (this.phase === 'finished') throw new Error('This session has ended.');
@@ -979,6 +984,20 @@ export default class BlocksyRoom extends Room {
   }
 
   // ---------------- lifecycle ----------------
+
+  /**
+   * Session length: the match's Round duration from the backend (cfg.durationMs). If that is 0 or missing,
+   * the Custom setting "sessionMinutes" is used; 0 there means the session lasts until everyone leaves.
+   */
+  private startSessionTimer(durationMs: number): void {
+    if (this.sessionTimer || this.finished) return;
+    const ms = durationMs > 0 ? durationMs : this.settings.sessionMinutes * 60_000;
+    this.startedAt = Date.now();
+    if (ms <= 0) return;
+    this.endsAt = this.startedAt + ms;
+    this.sessionTimer = this.clock.setTimeout(() => { void this.finish('time'); }, ms);
+    console.log(`[blocksy] session ${this.roomId}: ${Math.round(ms / 1000)} s`);
+  }
 
   /** Ends the session once: lock, report results, notify and close. */
   private async finish(reason: 'time' | 'empty'): Promise<void> {

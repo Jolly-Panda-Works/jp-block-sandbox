@@ -13,7 +13,8 @@
     "shared:hash": "node shared/hash.mjs",
     "dev:server": "npm --prefix dev-server run dev",
     "dev:all": "concurrently -k -n server,game -c cyan,magenta \"npm run dev:server\" \"npm run dev\"",
-    "setup": "npm install && npm --prefix dev-server install"
+    "setup": "npm install && npm --prefix dev-server install",
+    "build:pages": "vite build"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",

@@ -6,41 +6,54 @@ Browser game built with React Three Fiber. It connects to the **Blocksy game ser
 
 ## How the game connects (Rastaar platform)
 
-The game server is the Blocksy room deployed on the Rastaar platform at `wss://gameserver.rastar.ir`, with game key `blocksy`. Its source is a single `index.ts` built on `@rastaar/game-sdk`.
-
 ```
-1. POST {VITE_API_BASE_URL}/client/realtime/token  { multiplayerId }  →  { wsUrl, jwt }
-   (or pass ?jwt=… in the page URL to skip this step)
-2. new Client(wsUrl).joinOrCreate("blocksy", { jwt, multiplayerId, username, avatarUrl?, protocolVersion: 2 })
-3. welcome → init → state (10 Hz) …
+Player's app ──(1) POST {backend}/api/v1/client/realtime/token { multiplayerId } ──▶ Rastaar backend
+             ◀──────────────── { wsUrl, jwt, expiresAt }  (maybe inside { code, data }) ──
+             ──(2) joinOrCreate("blocksy", { jwt, multiplayerId, username, avatarUrl, protocolVersion }) ──▶ wss://gameserver.rastar.ir
 ```
 
-- **Token response:** the backend may return `{ wsUrl, jwt }` or the same inside `{ data: … }`. `token` or `accessToken` is accepted in place of `jwt`. If `wsUrl` is missing, `VITE_WS_URL` is used.
-- **Backend auth:** cookies by default. With `VITE_API_AUTH=bearer` the game sends `Authorization: Bearer`, taking the token from `?token=` or `localStorage["blocksy.authToken"]`. `src/net/api.ts` is the only file that talks to the backend.
-- **URL parameters:** the platform or a tester can open the game with:
+The JWT (HS256) has two claims the game server checks:
 
-  | Parameter | Effect |
-  |---|---|
-  | `jwt` | Realtime token; skips the backend request |
-  | `multiplayerId` | Session to join |
-  | `username` | Prefills the name |
-  | `avatarUrl` | Sent to the server with the join |
-  | `wsUrl` | Overrides `VITE_WS_URL` |
-  | `api` | Overrides `VITE_API_BASE_URL` |
+- `sub`: user id (UUID);
+- `mid`: match id (UUID).
 
-- **Reconnection:** if the connection drops, the game reconnects automatically. The server holds your place for 30 seconds.
-- **Profile persistence:** the platform server keeps profiles in memory only. The game caches your profile (free unlocks, hotbar, look) in `localStorage` per user and sends it back once per session with `restore`. The server only accepts free blocks from it.
-- **Session timer:** if the server's `sessionMinutes` setting is above 0, a timer is shown at the top. When it runs out, a "Session ended" screen appears.
+The `multiplayerId` sent with the join must equal `mid`. Players with the same match id play together; the room holds up to 8 players.
+
+There are two ways a player gets in. They need no code changes; only configuration differs.
+
+| | Launch link from the Rastaar app (recommended) | Token request from this page |
+|---|---|---|
+| How | The app already knows the player and the match. It requests the token itself and opens `https://<site>/?multiplayerId=<uuid>&jwt=<jwt>&username=<name>&avatarUrl=<url>`. | The page calls the token endpoint itself, with `VITE_API_BASE_URL` set at build time. The player is identified with `VITE_API_AUTH=cookie` (the backend session cookie) or `bearer` (the app access token, passed once as `?token=…`). |
+| Backend requirement | None. | CORS must allow the site's origin, e.g. `https://<user>.github.io`, with credentials in cookie mode. |
+
+- **Secrets in the URL:** `jwt` and `token` are removed from the address bar as soon as they are read.
+- **Invite link:** the menu (Esc) has a "Copy invite link" button. It copies `…/?multiplayerId=<uuid>` and never includes a token. Whoever opens it needs their own token for that match, either through the app or through the token endpoint.
+
+Other behaviour:
+
+- **Reconnection:** if the connection drops, the game reconnects within the server's 30 s window.
+- **Profile cache:** the profile (free unlocks, hotbar, look) is cached per user and restored after server restarts (`restore`).
+- **Session end:** the session ends when the match's Round duration runs out, and an end screen appears.
 
 ## Configuration (`.env`, see `.env.example`)
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `VITE_API_BASE_URL` | empty | Rastaar backend that issues realtime tokens |
+| `VITE_API_BASE_URL` | empty | Rastaar backend origin (only needed for the "token request" path) |
+| `VITE_TOKEN_PATH` | `/api/v1/client/realtime/token` | Token endpoint path |
 | `VITE_API_AUTH` | `cookie` | `cookie` or `bearer` |
-| `VITE_MULTIPLAYER_ID` | `public` | Session to join (also `?multiplayerId=`) |
-| `VITE_WS_URL` | `wss://gameserver.rastar.ir` | Game server |
-| `VITE_ROOM_NAME` | `blocksy` | Game key on the platform |
+| `VITE_WS_URL` | `wss://gameserver.rastar.ir` | Game server, if the token response has no `wsUrl` |
+| `VITE_ROOM_NAME` | `blocksy` | Game key |
+
+## Publish on GitHub Pages
+
+1. Push this repository to GitHub, on the `main` branch.
+2. Go to **Settings → Pages → Build and deployment → Source** and choose **GitHub Actions**.
+3. Optionally, go to **Settings → Secrets and variables → Actions → Variables** and add `VITE_API_BASE_URL`. You can also add `VITE_API_AUTH`, `VITE_WS_URL` and `VITE_ROOM_NAME`. These are public build-time values; never put a secret here.
+4. Push, or run the workflow by hand from the **Actions** tab. The site appears at `https://<user>.github.io/<repo>/`.
+5. Tell the backend team the site's origin, `https://<user>.github.io`. They need it for CORS (token-request path) or for building launch links (app path).
+
+The build uses a relative base (`base: './'`), so it works under any repository name. After the first local `npm install`, commit `package-lock.json`; the workflow then uses `npm ci`.
 
 ## Run locally (no backend needed)
 

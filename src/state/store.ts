@@ -17,6 +17,8 @@ interface GameState {
   sessionId: string | null;
   /** Platform user id (from the server's welcome message). */
   userId: string;
+  /** Match being played (for invite links). */
+  multiplayerId: string;
   /** Remaining session time in ms (0 = no time limit). */
   timeLeftMs: number;
   sessionEnded: boolean;
@@ -64,6 +66,7 @@ export const useGame = create<GameState>()((set, get) => ({
   name: savedName,
   sessionId: null,
   userId: '',
+  multiplayerId: '',
   timeLeftMs: 0,
   sessionEnded: false,
   reconnecting: false,
