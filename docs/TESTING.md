@@ -1,4 +1,4 @@
-# Testing
+# Blocksy — Testing
 
 ## Automated tests
 

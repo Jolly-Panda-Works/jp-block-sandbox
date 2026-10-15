@@ -15,7 +15,7 @@ export function Hud() {
   return (
     <div className="hud">
       <div className="card island">
-        <div className="badge">🏝️</div>
+        <img className="badge" src="/blocksy-icon.png" alt="Blocksy" />
         <div><div className="title">{ISLAND_NAME}</div><div className="sub">👥 {count} / {MAX_PLAYERS} players</div></div>
       </div>
       <div className="top-buttons">

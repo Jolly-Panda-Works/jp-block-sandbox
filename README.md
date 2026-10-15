@@ -1,4 +1,8 @@
-# Sunny Isle — Block Sandbox (React Three Fiber + Colyseus)
+<p align="center"><img src="client/public/blocksy-logo.png" alt="Blocksy" width="420" /></p>
+
+# Blocksy
+
+Multiplayer block-building sandbox built with React Three Fiber and Colyseus. Players start on the island **Sunny Isle**.
 
 A Minecraft-inspired multiplayer building game in the browser, modelled on the supplied reference images.
 All textures, characters and icons are original and generated in code. No Minecraft assets are used.
@@ -63,6 +67,21 @@ npm start          # Colyseus server also serves client/dist on http://localhost
 | Shop / Style / Social | B / C / G |
 | Hide hints | H |
 | Menu, close panels | Esc |
+
+## Branding
+
+Logo assets live in `client/public/`:
+
+| File | Use |
+|---|---|
+| `blocksy-icon.png` | 512 px icon |
+| `favicon.png` | favicon |
+| `apple-touch-icon.png` | touch icon |
+| `blocksy-logo.png` | full logo for light backgrounds |
+| `blocksy-logo-light.png` | full logo for dark backgrounds |
+| `blocksy-wordmark-light.png` / `blocksy-wordmark-dark.png` | wordmark only |
+
+All files are transparent PNGs. The internal workspace package names (`@jp/block-sandbox-*`) are unchanged to avoid breaking installs.
 
 ## Project structure
 

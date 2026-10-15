@@ -10,5 +10,6 @@ export const PLAYER_RADIUS = 0.3;
 export const EYE_HEIGHT = 1.62;
 export const RESPAWN_BELOW_Y = 0.5;
 export const ROOM_NAME = 'island';
+export const GAME_NAME = 'Blocksy';
 export const ISLAND_NAME = 'Sunny Isle';
 export const HOTBAR_SLOTS = 9;

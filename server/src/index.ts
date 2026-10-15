@@ -25,7 +25,7 @@ const gameServer = new Server({ transport: new WebSocketTransport({ server: http
 gameServer.define(ROOM_NAME, IslandRoom);
 
 gameServer.listen(PORT).then(() => {
-  console.log(`[server] Colyseus listening on ws://localhost:${PORT}  (room "${ROOM_NAME}")`);
+  console.log(`[server] Blocksy · Colyseus listening on ws://localhost:${PORT}  (room "${ROOM_NAME}")`);
 });
 
 const shutdown = () => { IslandRoom.profiles.flush(); process.exit(0); };

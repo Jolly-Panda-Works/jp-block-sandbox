@@ -1,4 +1,4 @@
-# Architecture
+# Blocksy — Architecture
 
 ```mermaid
 flowchart LR

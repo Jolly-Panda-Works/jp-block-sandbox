@@ -1,8 +1,8 @@
 {
-  "name": "jp-block-sandbox",
+  "name": "blocksy",
   "version": "0.1.0",
   "private": true,
-  "description": "Sunny Isle — a multiplayer block-building sandbox (React Three Fiber + Colyseus).",
+  "description": "Blocksy — a multiplayer block-building sandbox (React Three Fiber + Colyseus).",
   "workspaces": ["shared", "server", "client"],
   "scripts": {
     "dev": "concurrently -k -n server,client -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w client\"",

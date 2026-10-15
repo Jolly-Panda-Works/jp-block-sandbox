@@ -14,7 +14,7 @@ export function PauseMenu() {
   return (
     <div className="overlay">
       <div className="card panel pause">
-        <header><h2>Menu</h2></header>
+        <header><img className="menu-logo" src="/blocksy-logo-light.png" alt="Blocksy" /><h2>Menu</h2></header>
         <button className="primary wide" onClick={() => openPanel('none')}>Resume</button>
         <div className="pause-row">
           <button onClick={() => openPanel('shop')}>🧱 Shop</button>
