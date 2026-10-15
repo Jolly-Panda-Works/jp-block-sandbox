@@ -1,0 +1,87 @@
+import { useEffect, useState } from 'react';
+import { AIR, HOTBAR_SLOTS, ISLAND_NAME, MAX_PLAYERS, getBlock } from '@jp/block-sandbox-shared';
+import { useGame } from '../state/store';
+import { getIconUrl } from '../render/textures';
+import { now } from '../render/animState';
+import { lockPointer, togglePanel } from '../game/pointer';
+
+export function Keycap({ k }: { k: string }) { return <span className="keycap">{k}</span>; }
+
+/** In-game overlay modelled on the references. */
+export function Hud() {
+  const s = useGame();
+  const count = Object.keys(s.players).length;
+  const playing = s.panel === 'none';
+  return (
+    <div className="hud">
+      <div className="card island">
+        <div className="badge">🏝️</div>
+        <div><div className="title">{ISLAND_NAME}</div><div className="sub">👥 {count} / {MAX_PLAYERS} players</div></div>
+      </div>
+      <div className="top-buttons">
+        <button onClick={() => togglePanel('social')}>😊 Social <Keycap k="T" /></button>
+        <button onClick={() => togglePanel('customize')}>👕 Style <Keycap k="C" /></button>
+        <button onClick={() => togglePanel('shop')}>🧱 Shop <Keycap k="B" /></button>
+        <button onClick={() => togglePanel('pause')}>⚙️</button>
+      </div>
+      {playing && s.pointerLocked && <div className="crosshair" />}
+      {playing && !s.pointerLocked && <div className="click-to-play" onClick={lockPointer}>Click to play</div>}
+      {s.nearbyStall && playing && <div className="card prompt"><Keycap k="E" /> Open {s.nearbyStall.title} shop</div>}
+      <SelfBubble />
+      <Toast />
+      {s.showHints && (
+        <div className="card hints">
+          <span><Keycap k="W" /><Keycap k="A" /><Keycap k="S" /><Keycap k="D" /> Move</span>
+          <span><Keycap k="Space" /> Jump</span>
+          <span><Keycap k="LMB" /> Remove</span>
+          <span><Keycap k="RMB" /> Place</span>
+          <span><Keycap k="V" /> Camera</span>
+          <span><Keycap k="E" /> Interact</span>
+          <span><Keycap k="H" /> Hide</span>
+        </div>
+      )}
+      <div className="card mode"><Keycap k="V" /> {s.cameraMode === 'first' ? 'First person' : 'Third person'}</div>
+      <div className="card hotbar">
+        {Array.from({ length: HOTBAR_SLOTS }, (_, i) => {
+          const id = s.profile.hotbar[i] ?? AIR;
+          const def = getBlock(id);
+          const icon = def ? getIconUrl(id) : null;
+          return (
+            <button key={i} className={`slot ${i === s.selectedSlot ? 'selected' : ''}`} onClick={() => s.selectSlot(i)}>
+              <span className="num">{i + 1}</span>
+              {icon && <img src={icon} alt="" />}
+              <span className="name">{def?.name ?? ''}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Toast() {
+  const toast = useGame((s) => s.toast);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    if (!toast) return;
+    setVisible(true);
+    const h = setTimeout(() => setVisible(false), 2200);
+    return () => clearTimeout(h);
+  }, [toast]);
+  return <div className={`toast ${visible ? 'show' : ''}`}>{toast?.text}</div>;
+}
+
+/** In first person your own head bubble is out of view, so it is mirrored at the top of the screen. */
+function SelfBubble() {
+  const id = useGame((s) => s.sessionId);
+  const bubble = useGame((s) => (id ? s.bubbles[id] : undefined));
+  const mode = useGame((s) => s.cameraMode);
+  const [, force] = useState(0);
+  useEffect(() => {
+    if (!bubble) return;
+    const h = setTimeout(() => force((n) => n + 1), Math.max(0, (bubble.until - now()) * 1000) + 30);
+    return () => clearTimeout(h);
+  }, [bubble]);
+  if (mode !== 'first' || !bubble || bubble.until <= now()) return null;
+  return <div className="self-bubble">{bubble.emoji ?? bubble.text}</div>;
+}

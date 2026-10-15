@@ -1,0 +1,246 @@
+import { useEffect, useMemo, useRef } from 'react';
+import { useFrame, useThree } from '@react-three/fiber';
+import * as THREE from 'three';
+import {
+  AIR, EYE_HEIGHT, PLAYER_HEIGHT, PLAYER_RADIUS, REACH, RESPAWN_BELOW_Y, evaluatePlacement, evaluateRemoval, getBlock,
+  isSolidAt, moveBody, playerAabb, resolvePlacementCell, sleeveLength, voxelRaycast, withinReach, type StallInfo,
+} from '@jp/block-sandbox-shared';
+import { consumeInput } from './input';
+import { localBody, teleportLocal } from './localState';
+import { world } from './world';
+import { remotes, send } from '../net/network';
+import { useGame, selectedBlock } from '../state/store';
+import { Avatar } from '../render/Avatar';
+import { getAnim, now, playSwing } from '../render/animState';
+import { getBlockGeometry, getBlockMaterials } from '../render/textures';
+
+// Movement tuning
+const WALK = 4.3, SPRINT = 6.4, ACCEL_GROUND = 40, ACCEL_AIR = 12, GRAVITY = 26, MAX_FALL = 45;
+const JUMP_HEIGHT = 1.25, JUMP_VELOCITY = Math.sqrt(2 * GRAVITY * JUMP_HEIGHT), COYOTE = 0.1, JUMP_BUFFER = 0.12;
+// Camera tuning
+const PIVOT_HEIGHT = 1.55, SHOULDER = 0.45, TP_DISTANCE = 4.2, TRANSITION = 0.28, HIDE_BODY_BELOW = 0.9, LOOK_SPEED = 0.0025;
+// Interaction tuning
+const REPEAT_DELAY = 0.22, STALL_RADIUS = 3.6, SEND_INTERVAL = 1 / 15;
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/** Thin-box outline of a unit cube (WebGL lines are always 1 px, so edges are boxes). */
+function Outline() {
+  const edges = useMemo(() => {
+    const t = 0.03, o = 0.5 + t / 2, list: { p: [number, number, number]; s: [number, number, number] }[] = [];
+    for (const a of [-1, 1]) for (const b of [-1, 1]) {
+      list.push({ p: [0, a * o, b * o], s: [1 + 2 * t, t, t] });
+      list.push({ p: [a * o, 0, b * o], s: [t, 1 + 2 * t, t] });
+      list.push({ p: [a * o, b * o, 0], s: [t, t, 1 + 2 * t] });
+    }
+    return list;
+  }, []);
+  return <>{edges.map((e, i) => <mesh key={i} position={e.p} scale={e.s}><boxGeometry /><meshBasicMaterial color="#3fe6c8" /></mesh>)}</>;
+}
+
+/**
+ * The local player: input → voxel physics → camera (first/third person, blended, collision-aware) →
+ * block targeting, placement and removal (optimistic, confirmed by the server) → network updates.
+ */
+export function LocalPlayer() {
+  const { camera } = useThree();
+  const sessionId = useGame((s) => s.sessionId) ?? 'local';
+  const appearance = useGame((s) => s.profile.appearance);
+  const held = useGame(selectedBlock);
+  const anim = getAnim(sessionId);
+  const avatar = useRef<THREE.Group>(null);
+  const outline = useRef<THREE.Group>(null);
+  const ghost = useRef<THREE.Mesh>(null);
+  const arm = useRef<THREE.Group>(null);
+  const armInner = useRef<THREE.Group>(null);
+  const st = useRef({
+    blend: 1, camDist: TP_DISTANCE, lastGround: -9, lastJump: -9, nextRepeat: 0, sendAt: 0, bodyYaw: 0,
+    faceAimUntil: 0, nearby: null as StallInfo | null, hidden: false, layerKey: '', lastLook: null as unknown, armSwing: -9, bob: 0,
+  });
+
+  useEffect(() => { camera.layers.disable(1); }, [camera]);
+
+  useFrame((_, rawDt) => {
+    const g = world.grid;
+    if (!g) return;
+    const dt = Math.min(rawDt, 0.05), t = now(), s = st.current, b = localBody;
+    const game = useGame.getState();
+    const active = game.panel === 'none' && game.pointerLocked;
+    const inp = consumeInput();
+
+    // ---- look (mouse delta is per frame: never multiplied by dt) ----
+    if (active) {
+      b.yaw -= inp.lookX * LOOK_SPEED * game.sensitivity;
+      b.pitch += inp.lookY * LOOK_SPEED * game.sensitivity * (game.invertY ? -1 : 1);
+      if (inp.wheel) game.cycleSlot(inp.wheel);
+    }
+    s.blend = clamp(s.blend + Math.sign((game.cameraMode === 'third' ? 1 : 0) - s.blend) * (dt / TRANSITION), 0, 1);
+    const smooth = s.blend * s.blend * (3 - 2 * s.blend);
+    b.pitch = clamp(b.pitch, lerp(-1.48, -0.8, smooth), lerp(1.48, 1.3, smooth));
+
+    // ---- movement ----
+    let mx = active ? inp.moveX : 0, my = active ? inp.moveY : 0;
+    const ml = Math.hypot(mx, my);
+    if (ml > 1) { mx /= ml; my /= ml; }
+    const fx = Math.sin(b.yaw), fz = Math.cos(b.yaw), rx = -Math.cos(b.yaw), rz = Math.sin(b.yaw);
+    const speed = active && inp.sprint ? SPRINT : WALK;
+    const wx = (fx * my + rx * mx) * speed, wz = (fz * my + rz * mx) * speed;
+    const accel = (b.grounded ? ACCEL_GROUND : ACCEL_AIR) * dt;
+    const dvx = wx - b.vx, dvz = wz - b.vz, dl = Math.hypot(dvx, dvz);
+    if (dl <= accel) { b.vx = wx; b.vz = wz; } else { b.vx += (dvx / dl) * accel; b.vz += (dvz / dl) * accel; }
+
+    if (b.grounded) s.lastGround = t;
+    if (active && inp.jump) s.lastJump = t;
+    if (t - s.lastGround <= COYOTE && t - s.lastJump <= JUMP_BUFFER) {
+      b.vy = JUMP_VELOCITY;
+      s.lastGround = s.lastJump = -9; // consume both: no double jumps
+    }
+    b.vy = Math.max(b.vy - GRAVITY * dt, -MAX_FALL);
+    moveBody(g, b, dt, PLAYER_RADIUS, PLAYER_HEIGHT);
+    if (b.y < RESPAWN_BELOW_Y && game.layout) {
+      const sp = game.layout.spawn;
+      teleportLocal(sp.x, sp.y, sp.z);
+      game.showToast('Splash! Back to the island');
+    }
+
+    // ---- camera ----
+    const solid = (x: number, y: number, z: number) => isSolidAt(g, x, y, z);
+    const cp = Math.cos(b.pitch);
+    const dir = new THREE.Vector3(fx * cp, -Math.sin(b.pitch), fz * cp);
+    const eye = new THREE.Vector3(b.x, b.y + EYE_HEIGHT, b.z);
+    const head = new THREE.Vector3(b.x, b.y + PIVOT_HEIGHT, b.z);
+    let shoulder = SHOULDER;
+    const side = voxelRaycast(head.x, head.y, head.z, rx, 0, rz, SHOULDER + 0.3, solid);
+    if (side.hit) shoulder = Math.max(0, side.distance - 0.3);
+    const pivot = head.clone().add(new THREE.Vector3(rx * shoulder, 0, rz * shoulder));
+    const back = voxelRaycast(pivot.x, pivot.y, pivot.z, -dir.x, -dir.y, -dir.z, TP_DISTANCE + 0.3, solid);
+    const wanted = back.hit ? Math.max(0.2, back.distance - 0.3) : TP_DISTANCE;
+    s.camDist = wanted < s.camDist ? wanted : lerp(s.camDist, wanted, 1 - Math.exp(-6 * dt)); // pull in instantly, recover smoothly
+    const third = pivot.clone().addScaledVector(dir, -s.camDist);
+    camera.position.lerpVectors(eye, third, smooth);
+    camera.rotation.set(-b.pitch, b.yaw + Math.PI, 0, 'YXZ');
+
+    // ---- body presentation ----
+    const fp = s.blend < 0.5;
+    const hs = Math.hypot(b.vx, b.vz);
+    let targetYaw = s.bodyYaw;
+    if (fp || t < s.faceAimUntil) targetYaw = b.yaw;
+    else if (hs > 0.2) targetYaw = Math.atan2(b.vx, b.vz);
+    const diff = Math.atan2(Math.sin(targetYaw - s.bodyYaw), Math.cos(targetYaw - s.bodyYaw));
+    s.bodyYaw += fp ? diff : clamp(diff, -12 * dt, 12 * dt);
+    anim.speed = hs / WALK;
+    anim.grounded = b.grounded;
+    anim.holding = held !== AIR;
+    if (avatar.current) {
+      avatar.current.position.set(b.x, b.y, b.z);
+      avatar.current.rotation.set(0, s.bodyYaw, 0);
+      const hide = camera.position.distanceTo(eye) < HIDE_BODY_BELOW;
+      const key = `${hide}|${held}`;
+      if (key !== s.layerKey || s.lastLook !== appearance) {
+        s.layerKey = key;
+        s.lastLook = appearance;
+        // Layer 1 is invisible to the camera but still casts shadows (see Environment).
+        avatar.current.traverse((o) => o.layers.set(hide ? 1 : 0));
+      }
+    }
+
+    // ---- targeting and editing ----
+    const origin = camera.position;
+    const hit = voxelRaycast(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, REACH + origin.distanceTo(eye) + 1,
+      (x, y, z) => !!getBlock(g.get(x, y, z))?.targetable);
+    const minAlong = eye.clone().sub(origin).dot(dir) - 0.5; // ignore blocks between a third-person camera and the player
+    const valid = active && hit.hit && hit.distance >= minAlong && withinReach(eye.x, eye.y, eye.z, hit.x, hit.y, hit.z, REACH);
+    const blockers = [playerAabb(b.x, b.y, b.z), ...[...remotes.values()].map((r) => playerAabb(r.x, r.y, r.z))];
+    let place: [number, number, number] | null = null;
+    if (valid) {
+      place = resolvePlacementCell(g, hit.x, hit.y, hit.z, hit.nx, hit.ny, hit.nz);
+      if (held === AIR || evaluatePlacement(g, place[0], place[1], place[2], held, blockers) !== 'ok') place = null;
+    }
+    if (outline.current) { outline.current.visible = valid; if (valid) outline.current.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5); }
+    if (ghost.current) { ghost.current.visible = !!place; if (place) ghost.current.position.set(place[0] + 0.5, place[1] + 0.5, place[2] + 0.5); }
+
+    if (active) {
+      if (!inp.primaryHeld && !inp.secondaryHeld) s.nextRepeat = 0;
+      const remove = inp.primaryPressed || (inp.primaryHeld && t >= s.nextRepeat);
+      const placing = !remove && (inp.secondaryPressed || (inp.secondaryHeld && t >= s.nextRepeat));
+      if (remove || placing) s.nextRepeat = t + REPEAT_DELAY;
+      const explicit = inp.primaryPressed || inp.secondaryPressed;
+      if (remove) {
+        if (!valid) { if (explicit) game.showToast('Nothing in reach'); }
+        else {
+          const r = evaluateRemoval(g, hit.x, hit.y, hit.z);
+          if (r === 'ok') {
+            g.set(hit.x, hit.y, hit.z, AIR); // optimistic; the server confirms or rolls back
+            send('remove', { x: hit.x, y: hit.y, z: hit.z });
+            s.faceAimUntil = t + 0.8; s.armSwing = t; playSwing(sessionId);
+          } else if (explicit && r === 'protected') game.showToast('This part of the island is protected');
+          else if (explicit && r === 'not_removable') game.showToast("This block can't be removed");
+        }
+      } else if (placing) {
+        if (held === AIR) { if (explicit) game.showToast('Empty slot — get blocks at the shop (B)'); }
+        else if (!game.profile.owned.includes(held)) { if (explicit) game.showToast("You don't own this block yet"); }
+        else if (!valid) { if (explicit) game.showToast('Aim at a block to build on it'); }
+        else if (place) {
+          g.set(place[0], place[1], place[2], held);
+          send('place', { x: place[0], y: place[1], z: place[2], id: held });
+          s.faceAimUntil = t + 0.8; s.armSwing = t; playSwing(sessionId);
+        } else if (explicit) game.showToast('Someone is standing there');
+      }
+    }
+
+    // ---- first-person arm follows the camera ----
+    if (arm.current && armInner.current) {
+      arm.current.position.copy(camera.position);
+      arm.current.quaternion.copy(camera.quaternion);
+      arm.current.visible = s.blend < 0.02;
+      s.bob += dt * 9 * (b.grounded ? Math.min(1, hs / WALK) : 0);
+      const sw = (t - s.armSwing) / 0.25, swing = sw >= 0 && sw < 1 ? Math.sin(sw * Math.PI) : 0;
+      const amp = Math.min(1, hs / WALK) * 0.018;
+      armInner.current.position.set(0.36 + Math.cos(s.bob) * amp - 0.06 * swing, -0.6 + Math.abs(Math.sin(s.bob)) * amp + 0.05 * swing, -0.42 - 0.12 * swing);
+      armInner.current.rotation.set(-0.96 - 0.5 * swing, 0.31 + 0.17 * swing, 0);
+    }
+
+    // ---- shops, networking ----
+    let nearby: StallInfo | null = null;
+    if (game.layout && active) {
+      let best = STALL_RADIUS * STALL_RADIUS;
+      for (const st2 of game.layout.stalls) {
+        const d = (st2.interact.x - b.x) ** 2 + (st2.interact.z - b.z) ** 2 + ((st2.interact.y - b.y) ** 2) * 0.25;
+        if (d <= best) { best = d; nearby = st2; }
+      }
+    }
+    if (nearby !== s.nearby) { s.nearby = nearby; useGame.setState({ nearbyStall: nearby }); }
+
+    if (t >= s.sendAt) {
+      s.sendAt = t + SEND_INTERVAL;
+      send('move', { x: b.x, y: b.y, z: b.z, yaw: s.bodyYaw, speed: Math.min(2, hs / WALK), grounded: b.grounded });
+    }
+  });
+
+  const sleeve = sleeveLength(appearance.shirt) > 0 ? (appearance.shirt === 'tshirt' ? 0.3 : 0.58) : 0;
+  const heldGeo = held !== AIR ? getBlockGeometry(held) : null;
+  const overlay = (color: string) => <meshLambertMaterial color={color} depthTest={false} />;
+
+  return (
+    <>
+      <group ref={avatar}><Avatar appearance={appearance} anim={anim} heldBlock={held} /></group>
+      <group ref={outline} visible={false}><Outline /></group>
+      <mesh ref={ghost} visible={false} scale={0.98}>
+        <boxGeometry />
+        <meshBasicMaterial color="#5ff2d9" transparent opacity={0.28} depthWrite={false} />
+      </mesh>
+      {/* First-person arm: drawn on top (no depth test) so it never clips into walls. */}
+      <group ref={arm}>
+        <group ref={armInner}>
+          {sleeve > 0 && <mesh renderOrder={1000} position={[0, sleeve / 2, 0]} scale={[0.252, sleeve, 0.252]}><boxGeometry />{overlay(appearance.shirtColor)}</mesh>}
+          <mesh renderOrder={1000} position={[0, sleeve + (0.7 - sleeve) / 2, 0]} scale={[0.24, 0.7 - sleeve, 0.24]}><boxGeometry />{overlay(appearance.skin)}</mesh>
+          {heldGeo && (
+            <mesh renderOrder={1001} geometry={heldGeo} position={[0, 0.72, -0.16]} rotation={[0.96, -0.52, 0]} scale={0.3}
+              material={getBlockMaterials()} />
+          )}
+        </group>
+      </group>
+    </>
+  );
+}
