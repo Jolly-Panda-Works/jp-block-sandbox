@@ -2,7 +2,7 @@
   "name": "@jp/blocksy",
   "version": "0.3.0",
   "private": true,
-  "description": "Blocksy — multiplayer block-building game client (React Three Fiber).",
+  "description": "Blocksy \u2014 multiplayer block-building game client (React Three Fiber).",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,10 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p .",
     "test": "tsx --test shared/test/*.test.ts",
-    "shared:hash": "node shared/hash.mjs"
+    "shared:hash": "node shared/hash.mjs",
+    "dev:server": "npm --prefix dev-server run dev",
+    "dev:all": "concurrently -k -n server,game -c cyan,magenta \"npm run dev:server\" \"npm run dev\"",
+    "setup": "npm install && npm --prefix dev-server install"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",
@@ -29,6 +32,7 @@
     "@vitejs/plugin-react": "^4.3.3",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
-    "vite": "^5.4.10"
+    "vite": "^5.4.10",
+    "concurrently": "^9.0.1"
   }
 }

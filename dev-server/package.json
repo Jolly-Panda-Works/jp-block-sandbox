@@ -1,0 +1,20 @@
+{
+  "name": "@jp/blocksy-dev-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LOCAL DEVELOPMENT ONLY: runs the Rastaar game file (game/index.ts) with a local stand-in for @rastaar/game-sdk.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch server.ts",
+    "start": "tsx server.ts"
+  },
+  "dependencies": {
+    "@colyseus/ws-transport": "^0.16.0",
+    "colyseus": "^0.16.0",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

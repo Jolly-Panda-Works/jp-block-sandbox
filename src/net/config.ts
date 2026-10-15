@@ -19,4 +19,6 @@ export const config = {
   jwt: query.get('jwt') ?? '',
   username: query.get('username') ?? '',
   avatarUrl: query.get('avatarUrl') ?? '',
+  /** Local dev server mode (.env.development): issue a "dev:<id>" token instead of calling the backend. */
+  localDev: env.VITE_LOCAL_DEV === 'true' && import.meta.env.DEV === true,
 } as const;

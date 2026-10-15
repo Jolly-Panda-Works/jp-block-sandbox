@@ -3,6 +3,20 @@ import { config } from './config';
 /** What the game needs to join the realtime server. */
 export interface RealtimeCredentials { wsUrl: string; jwt?: string }
 
+/** Stable per-browser id for the local dev server's "dev:<id>" tokens. */
+function localDevId(): string {
+  try {
+    let id = localStorage.getItem('blocksy.devId');
+    if (!id) {
+      id = (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`).replace(/[^A-Za-z0-9-]/g, '');
+      localStorage.setItem('blocksy.devId', id);
+    }
+    return id;
+  } catch {
+    return `${Date.now()}`;
+  }
+}
+
 /** Bearer token for the backend: from ?token=... (stored for next time) or localStorage. */
 function bearerToken(): string | null {
   try {
@@ -22,6 +36,7 @@ function bearerToken(): string | null {
  */
 export async function getRealtimeCredentials(multiplayerId: string): Promise<RealtimeCredentials> {
   if (config.jwt) return { wsUrl: config.wsUrl, jwt: config.jwt };
+  if (!config.apiBaseUrl && config.localDev) return { wsUrl: config.wsUrl, jwt: `dev:${localDevId()}` };
   if (!config.apiBaseUrl) {
     throw new Error('No realtime token: set VITE_API_BASE_URL (Rastaar backend) or open the game with ?jwt=… from the platform.');
   }

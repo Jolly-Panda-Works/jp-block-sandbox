@@ -42,13 +42,30 @@ The game server is the Blocksy room deployed on the Rastaar platform at `wss://g
 | `VITE_WS_URL` | `wss://gameserver.rastar.ir` | Game server |
 | `VITE_ROOM_NAME` | `blocksy` | Game key on the platform |
 
-## Run
+## Run locally (no backend needed)
 
 ```bash
-npm install
-npm run dev        # http://localhost:5173  (needs VITE_API_BASE_URL or ?jwt=…)
+npm run setup      # installs the game and dev-server/
+npm run dev:all    # local game server on ws://localhost:2567 + game on http://localhost:5173
+```
+
+`dev-server/` runs the same `index.ts` that is deployed on Rastaar (`dev-server/game/index.ts`) with a local stand-in for `@rastaar/game-sdk`:
+
+- tokens are not verified;
+- custom settings come from `dev-server/settings.json`;
+- match results are only logged.
+
+`.env.development` points `npm run dev` at this local server.
+
+To play against the **real** platform from your machine, open the game with a token, e.g. `http://localhost:5173/?jwt=<TOKEN>&wsUrl=wss://gameserver.rastar.ir&multiplayerId=<ID>`. Alternatively, put `VITE_API_BASE_URL=…` in `.env.local` and delete `VITE_LOCAL_DEV` from `.env.development`.
+
+## Build for production
+
+```bash
 npm run build      # dist/ — static files, host anywhere
 ```
+
+The local mode is development-only and is never active in a production build.
 
 Env variables are baked in at build time.
 
