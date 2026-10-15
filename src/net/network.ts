@@ -29,10 +29,18 @@ export const remotes = new Map<string, RemoteState>();
 /** Latest replicated animal transforms; r* fields are interpolated render values. */
 export interface AnimalState { kind: string; variant: string; x: number; y: number; z: number; yaw: number; moving: boolean; rx: number; ry: number; rz: number; ryaw: number; hopAt?: number }
 export const animalStates = new Map<string, AnimalState>();
+/** Server time of day; the client advances it smoothly between updates. */
+export const worldClock = { hour: 8, day: 1, dayLengthMs: 0, at: 0 };
+/** Current in-game hour (0–24) and day number. */
+export function currentClock(): { hour: number; day: number } {
+  if (worldClock.dayLengthMs <= 0 || worldClock.at === 0) return { hour: worldClock.hour, day: worldClock.day };
+  const total = worldClock.hour + ((performance.now() - worldClock.at) / worldClock.dayLengthMs) * 24;
+  return { hour: total % 24, day: worldClock.day + Math.floor(total / 24) };
+}
 type AnimalSnapshot = { id: string; kind: string; variant: string; x: number; y: number; z: number; yaw: number; moving: boolean };
 
 /** Extra fields the Rastaar server adds to every `state` message. */
-type StateMessage = Omit<ServerMessages['state'], 'players'> & { players: StatePlayer[]; phase?: 'playing' | 'finished'; timeLeftMs?: number; games?: MgListing[]; acceptDelayMs?: number; animals?: AnimalSnapshot[] };
+type StateMessage = Omit<ServerMessages['state'], 'players'> & { players: StatePlayer[]; phase?: 'playing' | 'finished'; timeLeftMs?: number; games?: MgListing[]; acceptDelayMs?: number; animals?: AnimalSnapshot[]; clock?: { hour: number; day: number; dayLengthMs: number } };
 
 let client: Client | null = null;
 let room: Room | null = null;
@@ -106,7 +114,7 @@ function describe(err: unknown, wsUrl: string): string {
  * 2. Game server: joinOrCreate("blocksy", { jwt, multiplayerId, username, avatarUrl, protocolVersion })
  */
 /** Match/token typed on the join screen take precedence over the URL and build settings. */
-export interface JoinInput { multiplayerId?: string; jwt?: string; wsUrl?: string }
+export interface JoinInput { multiplayerId?: string; jwt?: string; wsUrl?: string; roomSettings?: Record<string, unknown> }
 
 export async function connect(name: string, input: JoinInput = {}): Promise<void> {
   const set = useGame.setState;
@@ -149,7 +157,7 @@ export async function connect(name: string, input: JoinInput = {}): Promise<void
     if (input.wsUrl && /^wss?:\/\//i.test(input.wsUrl)) creds.wsUrl = input.wsUrl;
     wsUrl = creds.wsUrl;
     const options: JoinOptions & { avatarUrl?: string } = {
-      jwt: creds.jwt, multiplayerId, username: name, protocolVersion: PROTOCOL_VERSION,
+      jwt: creds.jwt, multiplayerId, username: name, protocolVersion: PROTOCOL_VERSION, roomSettings: input.roomSettings,
       ...(config.avatarUrl ? { avatarUrl: config.avatarUrl } : {}),
     };
     client = new Client(wsUrl);
@@ -233,6 +241,7 @@ function attach(r: Room): void {
     for (const id of remotes.keys()) if (!seen.has(id)) remotes.delete(id);
     const timeLeftMs = typeof m.timeLeftMs === 'number' ? m.timeLeftMs : 0;
     if (timeLeftMs !== get().timeLeftMs) set({ timeLeftMs });
+    if (m.clock) Object.assign(worldClock, m.clock, { at: performance.now() });
     const animals = m.animals ?? [];
     for (const a of animals) {
       const s = animalStates.get(a.id);

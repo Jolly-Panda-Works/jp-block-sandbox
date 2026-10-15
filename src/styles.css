@@ -331,3 +331,16 @@ textarea:focus { border-color: var(--accent); }
 .playing-as { display: flex; gap: 8px; align-items: center; justify-content: center; color: var(--sub); }
 .playing-as b { color: var(--text); }
 .setting input { flex: 1; min-width: 0; padding: 6px 10px; }
+
+.world-time { position: absolute; top: 86px; left: 16px; padding: 6px 12px; font-weight: 800; font-size: 14px; pointer-events: none; }
+/* Create-room settings */
+.room-settings { display: flex; flex-direction: column; gap: 10px; background: rgba(0, 0, 0, 0.18); border-radius: 12px; padding: 12px; }
+.rs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px 12px; }
+.rs-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--sub); font-weight: 700; }
+.rs-grid select, .rs-grid input { width: 100%; }
+.rs-toggle { flex-direction: row !important; align-items: center; gap: 8px !important; }
+.animal-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+.animal-pick { padding: 4px 8px; border-radius: 999px; background: var(--tile); font-size: 13px; opacity: 0.45; }
+.animal-pick.on { opacity: 1; outline: 2px solid var(--accent); }
+.room-summary { font-size: 12px; color: var(--sub); }
+.seed-row { display: flex; gap: 6px; }

@@ -16,7 +16,7 @@ export const ROOM_NAME = 'blocksy';
  * Bump on any breaking change to messages or shared rules. Client and server each carry a copy of
  * `shared/`; the server refuses clients whose version differs, with a clear error.
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 /** Players joining with the same multiplayerId share a room; this is used when none is given. */
 export const DEFAULT_MULTIPLAYER_ID = 'public';
 export const GAME_NAME = 'Blocksy';

@@ -23,6 +23,9 @@ test('mock backend: guest sign-in (same device = same user), rename, rooms, toke
     await j('PATCH', '/api/v1/client/me', { username: 'Ali R' }, token);
     assert.equal((await j('GET', '/api/v1/client/me', undefined, token)).body.data.username, 'Ali R', 'rename from Settings');
 
+    const solo = await j('POST', '/api/v1/client/multiplayer/games/blocksy/matches', { name: 'Solo', maxPlayers: 1, settings: { animals: ['cat'] } }, token);
+    assert.equal(solo.body.data.maxPlayers, 1, 'a one-player room is allowed');
+    assert.deepEqual(solo.body.data.settings, { animals: ['cat'] }, 'settings are stored and echoed');
     const c = await j('POST', '/api/v1/client/multiplayer/games/blocksy/matches', { name: 'Ali island', maxPlayers: 2 }, token);
     const id = c.body.data.id;
     const t = await j('POST', '/api/v1/client/realtime/token', { multiplayerId: id }, token);

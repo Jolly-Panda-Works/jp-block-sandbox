@@ -5,7 +5,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-export interface Match { id: string; name: string; maxPlayers: number; createdBy: string }
+export interface Match { id: string; name: string; maxPlayers: number; createdBy: string; settings?: Record<string, unknown> }
 interface User { id: string; username: string }
 
 export const matches = new Map<string, Match>();
@@ -84,8 +84,10 @@ export async function handle(req: IncomingMessage, res: ServerResponse, liveCoun
   if (url === GAME_PREFIX && req.method === 'POST') {
     const body = await readJson(req);
     const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 40) : `${user.username}'s island`;
-    const max = typeof body.maxPlayers === 'number' ? Math.max(2, Math.min(8, Math.round(body.maxPlayers))) : 8;
-    const m: Match = { id: randomUUID(), name, maxPlayers: max, createdBy: user.id };
+    const max = typeof body.maxPlayers === 'number' ? Math.max(1, Math.min(8, Math.round(body.maxPlayers))) : 8;
+    // Room settings are stored as given (small opaque JSON); the game server validates them.
+    const settings = body.settings && typeof body.settings === 'object' && JSON.stringify(body.settings).length <= 4000 ? body.settings as Record<string, unknown> : undefined;
+    const m: Match = { id: randomUUID(), name, maxPlayers: max, createdBy: user.id, settings };
     matches.set(m.id, m);
     console.log(`[mock-backend] ${user.username} created room "${name}" (${m.id})`);
     return send(res, 201, { ...m, playerCount: 0 });

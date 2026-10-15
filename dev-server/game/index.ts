@@ -38,7 +38,7 @@ const ROOM_NAME = 'blocksy';
  * Bump on any breaking change to messages or shared rules. Client and server each carry a copy of
  * `shared/`; the server refuses clients whose version differs, with a clear error.
  */
-const PROTOCOL_VERSION = 5;
+const PROTOCOL_VERSION = 6;
 /** Players joining with the same multiplayerId share a room; this is used when none is given. */
 const DEFAULT_MULTIPLAYER_ID = 'public';
 const GAME_NAME = 'Blocksy';
@@ -1055,6 +1055,142 @@ const SWIMMING: readonly AnimalKind[] = ['duck'];
 /** Distance (m) within which a player can pet an animal. */
 const PET_RADIUS = 2.6;
 
+// ---------- shared/daynight.ts ----------
+/**
+ * Day / night cycle. The server owns the clock (hour 0–24 + day number); the client turns the hour into
+ * sun / moon direction, sky, fog and light colours with skyAt().
+ */
+
+interface WorldClock { hour: number; day: number }
+
+/** Clock after `elapsedMs` of play. dayLengthMs = length of a full 24-hour day; 0 = time stands still. */
+function clockAt(startHour: number, dayLengthMs: number, elapsedMs: number): WorldClock {
+  if (dayLengthMs <= 0) return { hour: startHour, day: 1 };
+  const total = startHour + (elapsedMs / dayLengthMs) * 24;
+  return { hour: ((total % 24) + 24) % 24, day: 1 + Math.floor(total / 24) };
+}
+
+const isNight = (hour: number): boolean => hour < 5.5 || hour >= 20.5;
+
+const formatClock = (hour: number): string => {
+  const h = Math.floor(hour), m = Math.floor((hour - h) * 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
+
+interface SkyState {
+  /** Direction toward the light (sun by day, moon by night), normalised. */
+  lightDir: [number, number, number];
+  /** Direction toward the sun (may be below the horizon). */
+  sunDir: [number, number, number];
+  lightColor: string;
+  lightIntensity: number;
+  background: string;
+  fog: string;
+  hemiSky: string;
+  hemiGround: string;
+  hemiIntensity: number;
+  ambient: number;
+  /** 0..1 */
+  stars: number;
+  /** 0..1, how strongly lanterns glow. */
+  lanterns: number;
+  /** Cloud tint. */
+  cloud: string;
+}
+
+type Key = Omit<SkyState, 'lightDir' | 'sunDir'> & { h: number };
+const KEYS: Key[] = [
+  { h: 0, lightColor: '#9fb4ff', lightIntensity: 0.35, background: '#0b1330', fog: '#101a38', hemiSky: '#34447a', hemiGround: '#151520', hemiIntensity: 0.45, ambient: 0.22, stars: 1, lanterns: 1, cloud: '#4a5578' },
+  { h: 4.8, lightColor: '#9fb4ff', lightIntensity: 0.35, background: '#141c46', fog: '#18224a', hemiSky: '#3a4a80', hemiGround: '#18182a', hemiIntensity: 0.5, ambient: 0.24, stars: 0.9, lanterns: 1, cloud: '#56608a' },
+  { h: 6, lightColor: '#ffb070', lightIntensity: 1.3, background: '#f0a27a', fog: '#f1b892', hemiSky: '#ffd7b0', hemiGround: '#6a5040', hemiIntensity: 0.85, ambient: 0.38, stars: 0.15, lanterns: 0.6, cloud: '#ffd6c2' },
+  { h: 8, lightColor: '#fff1d6', lightIntensity: 2.6, background: '#86c4ff', fog: '#a9d4fb', hemiSky: '#e3f1ff', hemiGround: '#8a7558', hemiIntensity: 1.3, ambient: 0.6, stars: 0, lanterns: 0, cloud: '#fbfdff' },
+  { h: 17, lightColor: '#fff1d6', lightIntensity: 2.6, background: '#86c4ff', fog: '#a9d4fb', hemiSky: '#e3f1ff', hemiGround: '#8a7558', hemiIntensity: 1.3, ambient: 0.6, stars: 0, lanterns: 0, cloud: '#fbfdff' },
+  { h: 19, lightColor: '#ff9a5a', lightIntensity: 1.3, background: '#ee8a62', fog: '#f2a37e', hemiSky: '#ffc8a0', hemiGround: '#5a4232', hemiIntensity: 0.85, ambient: 0.36, stars: 0.2, lanterns: 0.7, cloud: '#ffc4a8' },
+  { h: 20.5, lightColor: '#9fb4ff', lightIntensity: 0.4, background: '#2a2f62', fog: '#283058', hemiSky: '#3e4a86', hemiGround: '#1a1a28', hemiIntensity: 0.5, ambient: 0.24, stars: 0.8, lanterns: 1, cloud: '#5a5f8a' },
+  { h: 24, lightColor: '#9fb4ff', lightIntensity: 0.35, background: '#0b1330', fog: '#101a38', hemiSky: '#34447a', hemiGround: '#151520', hemiIntensity: 0.45, ambient: 0.22, stars: 1, lanterns: 1, cloud: '#4a5578' },
+];
+
+const hex = (c: string) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+const mixHex = (a: string, b: string, t: number) =>
+  `#${hex(a).map((v, i) => Math.round(v + (hex(b)[i] - v) * t).toString(16).padStart(2, '0')).join('')}`;
+const norm = (v: [number, number, number]): [number, number, number] => { const l = Math.hypot(...v) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+
+function skyAt(hour: number): SkyState {
+  const h = ((hour % 24) + 24) % 24;
+  let i = 0;
+  while (i < KEYS.length - 2 && KEYS[i + 1].h <= h) i++;
+  const a = KEYS[i], b = KEYS[i + 1];
+  const t = Math.min(1, Math.max(0, (h - a.h) / (b.h - a.h)));
+  const lerp = (x: number, y: number) => x + (y - x) * t;
+  // The sun rises in the east (+x) at 6:00, is highest at 12:00 and sets in the west at 18:00.
+  const ang = ((h - 6) / 12) * Math.PI;
+  const sunDir = norm([Math.cos(ang), Math.sin(ang), -0.35]);
+  const lightDir: [number, number, number] = sunDir[1] > 0.08 ? sunDir : norm([-sunDir[0] * 0.6, Math.max(0.35, -sunDir[1]), 0.4]);
+  return {
+    lightDir, sunDir,
+    lightColor: mixHex(a.lightColor, b.lightColor, t), lightIntensity: lerp(a.lightIntensity, b.lightIntensity),
+    background: mixHex(a.background, b.background, t), fog: mixHex(a.fog, b.fog, t),
+    hemiSky: mixHex(a.hemiSky, b.hemiSky, t), hemiGround: mixHex(a.hemiGround, b.hemiGround, t),
+    hemiIntensity: lerp(a.hemiIntensity, b.hemiIntensity), ambient: lerp(a.ambient, b.ambient),
+    stars: lerp(a.stars, b.stars), lanterns: lerp(a.lanterns, b.lanterns), cloud: mixHex(a.cloud, b.cloud, t),
+  };
+}
+
+// ---------- shared/roomSettings.ts ----------
+/**
+ * Settings the creator of a room chooses in the lobby. They are stored with the room (match) on the
+ * backend, sent by every client when joining, and applied by the game server when it creates the room
+ * (over the game-wide Custom settings from the dashboard). Everything is clamped here and again on the server.
+ */
+
+interface RoomSettings {
+  animals: AnimalKind[];
+  animalsPerKind: number;
+  ambientBots: number;
+  /** Seconds before a bot comes to play an unanswered invite; 0 = never. */
+  botJoinAfterSec: number;
+  /** Length of a full day in minutes; 0 = time stands still. */
+  dayLengthMin: number;
+  startHour: number;
+  /** Used only when the backend gives the match no duration. 0 = until everyone leaves. */
+  sessionMinutes: number;
+  chatEnabled: boolean;
+  worldSeed: number;
+  inviteAcceptDelaySec: number;
+  rpsPickSec: number;
+  rpsBestOf: number;
+  tttTurnSec: number;
+  chessTurnSec: number;
+  ludoTurnSec: number;
+}
+
+const DEFAULT_ROOM_SETTINGS: RoomSettings = {
+  animals: [...ANIMAL_KINDS], animalsPerKind: 2, ambientBots: 4, botJoinAfterSec: 5,
+  dayLengthMin: 20, startHour: 8, sessionMinutes: 0, chatEnabled: true, worldSeed: 1337,
+  inviteAcceptDelaySec: 5, rpsPickSec: 3, rpsBestOf: 3, tttTurnSec: 15, chessTurnSec: 60, ludoTurnSec: 10,
+};
+
+/** [min, max] per numeric setting. */
+const ROOM_SETTING_LIMITS: Record<Exclude<keyof RoomSettings, 'animals' | 'chatEnabled'>, [number, number]> = {
+  animalsPerKind: [1, 6], ambientBots: [0, 8], botJoinAfterSec: [0, 120], dayLengthMin: [0, 120], startHour: [0, 23],
+  sessionMinutes: [0, 240], worldSeed: [1, 2_147_483_647], inviteAcceptDelaySec: [0, 60], rpsPickSec: [2, 15],
+  rpsBestOf: [1, 9], tttTurnSec: [5, 120], chessTurnSec: [10, 600], ludoTurnSec: [3, 60],
+};
+
+/** Keeps only known keys with valid values (unknown or invalid values are dropped, not defaulted). */
+function sanitizeRoomSettings(raw: unknown): Partial<RoomSettings> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const o = raw as Record<string, unknown>;
+  const out: Partial<RoomSettings> = {};
+  if (Array.isArray(o.animals)) out.animals = ANIMAL_KINDS.filter((k) => (o.animals as unknown[]).includes(k));
+  if (typeof o.chatEnabled === 'boolean') out.chatEnabled = o.chatEnabled;
+  for (const [key, [min, max]] of Object.entries(ROOM_SETTING_LIMITS) as [keyof typeof ROOM_SETTING_LIMITS, [number, number]][]) {
+    const v = o[key];
+    if (typeof v === 'number' && Number.isFinite(v)) (out as Record<string, number>)[key] = Math.min(max, Math.max(min, Math.round(v)));
+  }
+  return out;
+}
+
 // ---------- shared/minigames.ts ----------
 /**
  * Popup mini-games: rules engines (pure, deterministic given the inputs) shared by client and server.
@@ -1564,6 +1700,8 @@ interface JoinOptions {
   /** Anonymous id used only when the server runs without JWT verification (local development). */
   profileId?: string;
   protocolVersion: number;
+  /** Settings chosen by the room's creator (stored with the match); applied when the room is created. */
+  roomSettings?: Record<string, unknown>;
 }
 
 /** Per-player transform sent in every `state` message. */
@@ -1643,6 +1781,8 @@ interface BlocksySettings {
   /** Animals on this server (Custom settings "animals": true | false | ["cow", …]). Biomes follow from it. */
   animals: AnimalKind[];
   animalsPerKind: number;
+  dayLengthMin: number;
+  startHour: number;
   botJoinAfterSec: number;
   rpsPickSec: number;
   rpsBestOf: number;
@@ -1654,8 +1794,9 @@ interface BlocksySettings {
   chatEnabled: boolean;
 }
 
-function readSettings(roomName: string): BlocksySettings {
-  const raw = (getGameSettings<BlocksySettings>(roomName) ?? {}) as Partial<Record<keyof BlocksySettings, unknown>>;
+/** Dashboard Custom settings, with the room creator's choices (from the match) on top. */
+function readSettings(roomName: string, roomOverrides?: unknown): BlocksySettings {
+  const raw = { ...((getGameSettings<BlocksySettings>(roomName) ?? {}) as object), ...sanitizeRoomSettings(roomOverrides) } as Partial<Record<keyof BlocksySettings, unknown>>;
   const int = (v: unknown, def: number, min: number, max: number) =>
     typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : def;
   return {
@@ -1664,7 +1805,9 @@ function readSettings(roomName: string): BlocksySettings {
     ambientBots: int(raw.ambientBots, 4, 0, 8),
     animals: parseAnimalSetting(raw.animals),
     animalsPerKind: int((raw as Record<string, unknown>).animalsPerKind, 2, 1, 6),
-    botJoinAfterSec: int(raw.botJoinAfterSec, 5, 1, 120),
+    botJoinAfterSec: int(raw.botJoinAfterSec, 5, 0, 120),
+    dayLengthMin: int(raw.dayLengthMin, 20, 0, 120),
+    startHour: int(raw.startHour, 8, 0, 23),
     rpsPickSec: int(raw.rpsPickSec, 3, 2, 15),
     rpsBestOf: int(raw.rpsBestOf, 3, 1, 9),
     tttTurnSec: int(raw.tttTurnSec, 15, 5, 120),
@@ -2285,15 +2428,26 @@ class AmbientLife {
   ) {
     const cx = Math.floor(layout.center.x), cz = Math.floor(layout.center.z);
     const waterId = blockId('water');
+    // Walkable ground is found from the ground UP, so tree tops, roofs and trunks never count as ground
+    // (bots and animals used to spawn on and walk over canopies). Leaves and wood are never ground.
+    const notGround = new Set(['leaves', 'spruce_leaves', 'oak_log', 'spruce_log', 'bamboo'].map((k) => blockId(k)));
+    const maxY = SURFACE_Y + 4;
     for (let x = cx - 49; x <= cx + 49; x++) for (let z = cz - 49; z <= cz + 49; z++) {
       if (Math.hypot(x - cx, z - cz) > 48) continue;
-      for (let y = 14; y >= 2; y--) {
-        const id = grid.get(x, y, z);
-        if (id === waterId) { if (grid.get(x, y + 1, z) === AIR) this.swim.set(`${x},${z}`, y + 0.65); break; }
+      for (let y = 1; y <= maxY; y++) {
+        const id = grid.get(x, y, z), above = grid.get(x, y + 1, z);
         const ground = getBlock(id);
-        if (!ground?.solid || ground.shape !== 'cube') continue;
-        const feet = getBlock(grid.get(x, y + 1, z)), head = getBlock(grid.get(x, y + 2, z));
-        if (!feet?.solid && !head?.solid) { this.walk.set(`${x},${z}`, y + 1); this.cells.push([x, z]); }
+        if (!ground?.solid || ground.shape !== 'cube' || notGround.has(id)) continue;
+        if (above === waterId) {                              // pond: swim on the surface
+          let top = y + 1;
+          while (grid.get(x, top + 1, z) === waterId) top++;
+          if (grid.get(x, top + 1, z) === AIR) this.swim.set(`${x},${z}`, top + 0.65);
+          break;
+        }
+        const feet = getBlock(above), head = getBlock(grid.get(x, y + 2, z));
+        if (feet?.solid || head?.solid) continue;             // something stands here (fence, trunk…)
+        this.walk.set(`${x},${z}`, y + 1);
+        this.cells.push([x, z]);
         break;
       }
     }
@@ -2333,11 +2487,23 @@ class AmbientLife {
     }
   }
 
-  tick(dt: number, joinAfterMs: number): void {
+  private night = false;
+
+  tick(dt: number, joinAfterMs: number, hour: number): void {
     const now = Date.now();
-    this.assignInvites(now, joinAfterMs);
+    const night = isNight(hour);
+    if (night !== this.night) this.dayChange(night);
+    this.night = night;
+    if (joinAfterMs > 0) this.assignInvites(now, joinAfterMs);
     for (const b of this.bots) this.tickBot(b, dt, now);
     for (const a of this.animals) this.tickAnimal(a, dt, now);
+  }
+
+  /** Dusk / dawn: a bot says good night / good morning, roosters crow at sunrise. */
+  private dayChange(night: boolean): void {
+    const b = this.bots[Math.floor(Math.random() * this.bots.length)];
+    if (b) this.say('chat', b.id, night ? 'Good night! 🌙' : 'Good morning! ☀️');
+    if (!night) for (const a of this.animals) if (a.kind === 'rooster') this.onPet(a.id, '', a.kind);
   }
 
   /** Position of a player or bot (for petting and following). */
@@ -2374,6 +2540,7 @@ class AmbientLife {
       }
     }
     a.followId = '';
+    if (this.night && !flyer && !swimmer) { a.moving = false; return; }   // most animals rest at night
     if (!a.moving && now >= a.waitUntil) {
       const [x, z] = a.home[Math.floor(Math.random() * a.home.length)];
       a.tx = x + 0.5; a.tz = z + 0.5; a.moving = true;
@@ -2567,15 +2734,23 @@ export default class BlocksyRoom extends Room {
   private stateTimer: Delayed | null = null;
   private hub!: MiniGameHub;
   private life!: AmbientLife;
+  private clockStart = Date.now();
+
+  /** In-game time of day (server-owned, identical for everyone). */
+  private worldClock(): WorldClock & { dayLengthMs: number } {
+    const dayLengthMs = this.settings.dayLengthMin * 60_000;
+    return { ...clockAt(this.settings.startHour, dayLengthMs, Date.now() - this.clockStart), dayLengthMs };
+  }
   private sessionTimer: Delayed | null = null;
 
   onCreate(options: Record<string, unknown> = {}): void {
-    this.settings = readSettings(this.roomName);
+    this.settings = readSettings(this.roomName, options.roomSettings);
+    this.clockStart = Date.now();
     this.multiplayerId = sanitizeMultiplayerId(options.multiplayerId, DEFAULT_MULTIPLAYER_ID);
     this.layout = generateIsland(this.grid, this.settings.worldSeed, { biomes: biomesFor(this.settings.animals) });
     this.startedAt = Date.now();
     this.stateTimer = this.clock.setInterval(() => {
-      this.life?.tick(STATE_INTERVAL_MS / 1000, this.settings.botJoinAfterSec * 1000);
+      this.life?.tick(STATE_INTERVAL_MS / 1000, this.settings.botJoinAfterSec * 1000, this.worldClock().hour);
       this.broadcastState();
     }, STATE_INTERVAL_MS);
     this.hub = new MiniGameHub({
@@ -2832,8 +3007,10 @@ export default class BlocksyRoom extends Room {
       });
     }
     const animals = this.life.animals.map((a) => ({ id: a.id, kind: a.kind, variant: a.variant, x: round3(a.x), y: round3(a.y), z: round3(a.z), yaw: round3(a.yaw), moving: a.moving }));
+    const c = this.worldClock();
     this.broadcast('state', {
       t: Date.now(),
+      clock: { hour: Math.round(c.hour * 1000) / 1000, day: c.day, dayLengthMs: c.dayLengthMs },
       animals,
       phase: this.phase,
       timeLeftMs: this.endsAt ? Math.max(0, this.endsAt - Date.now()) : 0,

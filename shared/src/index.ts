@@ -14,4 +14,6 @@ export * from './textures';
 export * from './mesher';
 export * from './minigames';
 export * from './animals';
+export * from './daynight';
+export * from './roomSettings';
 export type * from './protocol';

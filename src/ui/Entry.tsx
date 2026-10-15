@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { GAME_NAME, ISLAND_NAME, MAX_NAME_LENGTH, sanitizeName } from '@jp/blocksy-shared';
+import {
+  ANIMAL_ICON, ANIMAL_KINDS, DEFAULT_ROOM_SETTINGS, GAME_NAME, ISLAND_NAME, MAX_NAME_LENGTH, sanitizeName,
+  type AnimalKind, type RoomSettings,
+} from '@jp/blocksy-shared';
 import { asset } from '../assets';
 import { connect } from '../net/network';
 import { UUID_RE, config, inviteLink, parseMatchInput, parsePastedToken } from '../net/config';
@@ -143,6 +146,61 @@ function TestToken() {
   );
 }
 
+/** Short description of a room's settings for its card. */
+function summary(s: Partial<RoomSettings>): string {
+  const parts: string[] = [];
+  if (s.animals) parts.push(s.animals.length === 0 ? 'no animals' : s.animals.length === ANIMAL_KINDS.length ? '🐾 all animals' : s.animals.map((a) => ANIMAL_ICON[a]).join(''));
+  if (s.dayLengthMin !== undefined) parts.push(s.dayLengthMin === 0 ? `⏸ ${String(s.startHour ?? 8).padStart(2, '0')}:00` : `🌗 ${s.dayLengthMin} min day`);
+  if (s.ambientBots !== undefined) parts.push(`🤖 ${s.ambientBots}`);
+  if (s.sessionMinutes) parts.push(`⏱ ${s.sessionMinutes} min`);
+  if (s.chatEnabled === false) parts.push('chat off');
+  return parts.join(' · ');
+}
+
+const numberOptions = (values: number[], label: (v: number) => string) => values.map((v) => <option key={v} value={v}>{label(v)}</option>);
+
+/** Everything the creator can choose for a new room (applied by the game server when the room starts). */
+function RoomSettingsForm({ value, onChange }: { value: RoomSettings; onChange: (v: RoomSettings) => void }) {
+  const set = <K extends keyof RoomSettings>(k: K, v: RoomSettings[K]) => onChange({ ...value, [k]: v });
+  const num = (k: keyof RoomSettings) => (e: { target: { value: string } }) => set(k, Number(e.target.value) as never);
+  const toggleAnimal = (a: AnimalKind) => set('animals', value.animals.includes(a) ? value.animals.filter((x) => x !== a) : ANIMAL_KINDS.filter((k) => k === a || value.animals.includes(k)));
+  return (
+    <div className="room-settings">
+      <div className="rs-grid">
+        <label>Session length<select value={value.sessionMinutes} onChange={num('sessionMinutes')}>{numberOptions([0, 10, 20, 30, 60, 120], (v) => (v ? `${v} minutes` : 'Until everyone leaves'))}</select></label>
+        <label>Day length<select value={value.dayLengthMin} onChange={num('dayLengthMin')}>{numberOptions([5, 10, 20, 40, 60, 0], (v) => (v ? `${v} minutes` : 'Time stands still'))}</select></label>
+        <label>Start time<select value={value.startHour} onChange={num('startHour')}>{numberOptions([6, 8, 12, 17, 19, 22], (v) => `${String(v).padStart(2, '0')}:00 ${v < 6 || v >= 21 ? '🌙' : v < 8 || v >= 19 ? '🌅' : '☀️'}`)}</select></label>
+        <label>Wandering bots<select value={value.ambientBots} onChange={num('ambientBots')}>{numberOptions([0, 1, 2, 3, 4, 6, 8], (v) => (v ? `${v} bots` : 'None'))}</select></label>
+        <label>Bot joins an unanswered invite<select value={value.botJoinAfterSec} onChange={num('botJoinAfterSec')}>{numberOptions([5, 10, 20, 30, 0], (v) => (v ? `after ${v} s` : 'Never'))}</select></label>
+        <label>Animals of each kind<select value={value.animalsPerKind} onChange={num('animalsPerKind')}>{numberOptions([1, 2, 3, 4, 6], (v) => `${v}`)}</select></label>
+        <label className="rs-toggle"><input type="checkbox" checked={value.chatEnabled} onChange={(e) => set('chatEnabled', e.target.checked)} /> Chat messages</label>
+      </div>
+      <div>
+        <small className="muted">Animals — biomes without any chosen animal are left out of the world</small>
+        <div className="animal-picks">
+          <button type="button" className="animal-pick on" onClick={() => set('animals', [...ANIMAL_KINDS])}>All</button>
+          <button type="button" className="animal-pick on" onClick={() => set('animals', [])}>None</button>
+          {ANIMAL_KINDS.map((a) => (
+            <button type="button" key={a} className={`animal-pick ${value.animals.includes(a) ? 'on' : ''}`} onClick={() => toggleAnimal(a)}>{ANIMAL_ICON[a]} {a}</button>
+          ))}
+        </div>
+      </div>
+      <details>
+        <summary className="muted">Advanced</summary>
+        <div className="rs-grid">
+          <label>World seed<div className="seed-row"><input type="number" value={value.worldSeed} onChange={num('worldSeed')} /><button type="button" onClick={() => set('worldSeed', 1 + Math.floor(Math.random() * 2_000_000_000))}>🎲</button></div></label>
+          <label>Join an invite after (s)<input type="number" min={0} max={60} value={value.inviteAcceptDelaySec} onChange={num('inviteAcceptDelaySec')} /></label>
+          <label>Rock Paper Scissors pick (s)<input type="number" min={2} max={15} value={value.rpsPickSec} onChange={num('rpsPickSec')} /></label>
+          <label>Rock Paper Scissors best of<select value={value.rpsBestOf} onChange={num('rpsBestOf')}>{numberOptions([1, 3, 5, 7], (v) => `${v}`)}</select></label>
+          <label>Tic Tac Toe turn (s)<input type="number" min={5} max={120} value={value.tttTurnSec} onChange={num('tttTurnSec')} /></label>
+          <label>Chess turn (s)<input type="number" min={10} max={600} value={value.chessTurnSec} onChange={num('chessTurnSec')} /></label>
+          <label>Ludo turn (s)<input type="number" min={3} max={60} value={value.ludoTurnSec} onChange={num('ludoTurnSec')} /></label>
+        </div>
+      </details>
+    </div>
+  );
+}
+
 function RoomCard({ room, onJoin, busy }: { room: RoomInfo; onJoin: (r: RoomInfo) => void; busy: boolean }) {
   const full = isFull(room);
   return (
@@ -150,6 +208,7 @@ function RoomCard({ room, onJoin, busy }: { room: RoomInfo; onJoin: (r: RoomInfo
       <div className="room-main">
         <div className="room-name" dir="auto">{room.name}</div>
         <div className="room-id" title={room.id}>{room.id.slice(0, 8)}…</div>
+        {room.settings && <div className="room-summary">{summary(room.settings)}</div>}
       </div>
       <div className="room-count" aria-label={`${room.playerCount} of ${room.maxPlayers} players`}>
         <span className="dots">{Array.from({ length: room.maxPlayers }, (_, i) => <i key={i} className={i < room.playerCount ? 'on' : ''} />)}</span>
@@ -172,6 +231,8 @@ function Lobby({ startError, onRename }: { startError: string; onRename: () => v
   const [found, setFound] = useState<RoomInfo | null | undefined>(undefined);
   const [newName, setNewName] = useState('');
   const [newMax, setNewMax] = useState(MAX_ROOM_PLAYERS);
+  const [newSettings, setNewSettings] = useState<RoomSettings>({ ...DEFAULT_ROOM_SETTINGS, worldSeed: 1 + Math.floor(Math.random() * 2_000_000_000) });
+  const [showSettings, setShowSettings] = useState(false);
   const [created, setCreated] = useState<RoomInfo | null>(null);
   const [copied, setCopied] = useState(false);
   const busy = phase === 'connecting';
@@ -204,12 +265,13 @@ function Lobby({ startError, onRename }: { startError: string; onRename: () => v
   }, []);
   useEffect(() => { if (config.multiplayerId) void search(config.multiplayerId); }, [search]);
 
-  const join = (r: RoomInfo) => { lockLandscape(); void connect(sanitizeName(name), { multiplayerId: r.id }); };
+  const join = (r: RoomInfo) => { lockLandscape(); void connect(sanitizeName(name), { multiplayerId: r.id, roomSettings: r.settings }); };
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      const r = await platform.createRoom(newName.trim() || `${sanitizeName(name)}'s island`, newMax);
+      const r = await platform.createRoom(newName.trim() || `${sanitizeName(name)}'s island`, newMax, newSettings);
+      if (!r.settings) r.settings = newSettings; // backend didn't echo them: keep ours for joining
       setCreated(r);
       setCopied(false);
       void refresh();
@@ -246,10 +308,12 @@ function Lobby({ startError, onRename }: { startError: string; onRename: () => v
         <form className="row-form" onSubmit={create}>
           <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Room name" maxLength={40} dir="auto" />
           <select value={newMax} onChange={(e) => setNewMax(Number(e.target.value))} aria-label="Max players">
-            {Array.from({ length: MAX_ROOM_PLAYERS - 1 }, (_, i) => i + 2).map((n) => <option key={n} value={n}>{n} players</option>)}
+            {Array.from({ length: MAX_ROOM_PLAYERS }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n === 1 ? '1 player' : `${n} players`}</option>)}
           </select>
+          <button type="button" onClick={() => setShowSettings((v) => !v)}>⚙️ Settings</button>
           <button className="primary">Create</button>
         </form>
+        {showSettings && <RoomSettingsForm value={newSettings} onChange={setNewSettings} />}
         {created && (
           <div className="created">
             <div>Room <b dir="auto">{created.name}</b> is ready. Share its id or link:</div>

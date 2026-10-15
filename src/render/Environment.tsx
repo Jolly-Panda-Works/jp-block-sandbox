@@ -1,38 +1,60 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import type { IslandLayout } from '@jp/blocksy-shared';
+import { skyAt, type IslandLayout } from '@jp/blocksy-shared';
+import { currentClock } from '../net/network';
 import { createSignTexture, createWaterTexture } from './textures';
 import { localBody } from '../game/localState';
 
-const SUN_DIR = new THREE.Vector3(-0.45, 0.75, -0.5).normalize();
+/** Live sky state for this frame (updated by Environment from the in-game clock). */
+const live = {
+  sun: new THREE.Vector3(0, 1, 0), light: new THREE.Vector3(0, 1, 0), stars: 0, lanterns: 0,
+};
+const CLOUD_MAT = new THREE.MeshBasicMaterial({ color: '#fbfdff' });
 
 /** Sunny-island atmosphere from the references: warm sun + soft shadows, sky, fog, sea, square sun, clouds, gulls, signs, lantern glow. */
+/** Island atmosphere driven by the in-game clock: sun / moon, sky, fog, lights, stars, lantern glow. */
 export function Environment({ layout }: { layout: IslandLayout }) {
   const { scene } = useThree();
   const sun = useRef<THREE.DirectionalLight>(null);
+  const hemi = useRef<THREE.HemisphereLight>(null);
+  const amb = useRef<THREE.AmbientLight>(null);
+  const bg = useMemo(() => new THREE.Color('#86c4ff'), []);
+  const fog = useMemo(() => new THREE.Fog('#a9d4fb', 75, 220), []);
 
   useEffect(() => {
     const l = sun.current;
+    scene.background = bg;
+    scene.fog = fog;
     if (!l) return;
     scene.add(l.target);
     l.shadow.camera.layers.enable(1); // the hidden first-person body still casts a shadow
     return () => { scene.remove(l.target); };
-  }, [scene]);
+  }, [scene, bg, fog]);
 
   useFrame(() => {
+    const k = skyAt(currentClock().hour);
+    live.sun.set(...k.sunDir);
+    live.light.set(...k.lightDir);
+    live.stars = k.stars;
+    live.lanterns = k.lanterns;
+    bg.set(k.background);
+    fog.color.set(k.fog);
+    CLOUD_MAT.color.set(k.cloud);
+    if (hemi.current) { hemi.current.color.set(k.hemiSky); hemi.current.groundColor.set(k.hemiGround); hemi.current.intensity = k.hemiIntensity; }
+    if (amb.current) amb.current.intensity = k.ambient;
     const l = sun.current;
     if (!l) return;
+    l.color.set(k.lightColor);
+    l.intensity = k.lightIntensity;
     l.target.position.set(localBody.x, localBody.y, localBody.z);
-    l.position.set(localBody.x + SUN_DIR.x * 60, localBody.y + SUN_DIR.y * 60, localBody.z + SUN_DIR.z * 60);
+    l.position.set(localBody.x + live.light.x * 60, localBody.y + live.light.y * 60, localBody.z + live.light.z * 60);
   });
 
   return (
     <>
-      <color attach="background" args={['#86c4ff']} />
-      <fog attach="fog" args={['#a9d4fb', 75, 220]} />
-      <hemisphereLight args={['#e3f1ff', '#8a7558', 1.3]} />
-      <ambientLight intensity={0.6} />
+      <hemisphereLight ref={hemi} args={['#e3f1ff', '#8a7558', 1.3]} />
+      <ambientLight ref={amb} intensity={0.6} />
       <directionalLight
         ref={sun}
         color="#fff1d6"
@@ -50,6 +72,8 @@ export function Environment({ layout }: { layout: IslandLayout }) {
       />
       <Sea layout={layout} />
       <SunDisc />
+      <MoonDisc />
+      <Stars />
       <Clouds layout={layout} />
       <Seagulls layout={layout} />
       <Signs layout={layout} />
@@ -69,13 +93,15 @@ function Sea({ layout }: { layout: IslandLayout }) {
   );
 }
 
+/** Square sun: follows the in-game sun, hidden below the horizon. */
 function SunDisc() {
   const ref = useRef<THREE.Mesh>(null);
   const { camera } = useThree();
   useFrame(() => {
     const m = ref.current;
     if (!m) return;
-    m.position.copy(camera.position).addScaledVector(SUN_DIR, 400);
+    m.visible = live.sun.y > -0.05;
+    m.position.copy(camera.position).addScaledVector(live.sun, 400);
     m.lookAt(camera.position);
   });
   return (
@@ -84,6 +110,53 @@ function SunDisc() {
       <meshBasicMaterial color="#fff8d2" fog={false} />
     </mesh>
   );
+}
+
+/** Square moon opposite the sun. */
+function MoonDisc() {
+  const ref = useRef<THREE.Mesh>(null);
+  const { camera } = useThree();
+  const dir = useMemo(() => new THREE.Vector3(), []);
+  useFrame(() => {
+    const m = ref.current;
+    if (!m) return;
+    dir.copy(live.sun).negate();
+    m.visible = dir.y > -0.05;
+    m.position.copy(camera.position).addScaledVector(dir, 400);
+    m.lookAt(camera.position);
+  });
+  return (
+    <mesh ref={ref} renderOrder={-1}>
+      <planeGeometry args={[16, 16]} />
+      <meshBasicMaterial color="#e8eefc" fog={false} />
+    </mesh>
+  );
+}
+
+/** Night sky: a dome of square stars that fades in after dusk. */
+function Stars() {
+  const ref = useRef<THREE.Points>(null);
+  const { camera } = useThree();
+  const geo = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    const pts: number[] = [];
+    for (let i = 0; i < 600; i++) {
+      const u = Math.random() * 2 - 1, th = Math.random() * Math.PI * 2;
+      const y = Math.abs(u) * 0.9 + 0.1, r = Math.sqrt(1 - y * y);
+      pts.push(Math.cos(th) * r * 380, y * 380, Math.sin(th) * r * 380);
+    }
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    return g;
+  }, []);
+  const mat = useMemo(() => new THREE.PointsMaterial({ color: '#ffffff', size: 2.2, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false }), []);
+  useFrame(() => {
+    const p = ref.current;
+    if (!p) return;
+    p.position.copy(camera.position);
+    mat.opacity = live.stars;
+    p.visible = live.stars > 0.01;
+  });
+  return <points ref={ref} geometry={geo} material={mat} renderOrder={-2} />;
 }
 
 function Clouds({ layout }: { layout: IslandLayout }) {
@@ -107,7 +180,7 @@ function Clouds({ layout }: { layout: IslandLayout }) {
       {clouds.map((c, i) => (
         <mesh key={i} position={[c.x, c.y, c.z]} scale={[c.w, 2, c.l]}>
           <boxGeometry />
-          <meshBasicMaterial color="#fbfdff" />
+          <primitive object={CLOUD_MAT} attach="material" />
         </mesh>
       ))}
     </group>
@@ -164,8 +237,11 @@ function Signs({ layout }: { layout: IslandLayout }) {
 
 function LanternLights({ layout }: { layout: IslandLayout }) {
   // Point lights are expensive in forward rendering: light the 6 lanterns closest to the spawn.
+  // They glow brightly at night and fade out by day.
   const picks = useMemo(() => [...layout.lanterns]
     .sort((a, b) => Math.hypot(a[0] - layout.spawn.x, a[2] - layout.spawn.z) - Math.hypot(b[0] - layout.spawn.x, b[2] - layout.spawn.z))
     .slice(0, 6), [layout]);
-  return <>{picks.map(([x, y, z], i) => <pointLight key={i} position={[x + 0.5, y + 0.3, z + 0.5]} color="#ffb860" intensity={5} distance={6} decay={2} />)}</>;
+  const refs = useRef<(THREE.PointLight | null)[]>([]);
+  useFrame(() => { for (const l of refs.current) if (l) l.intensity = 1.5 + live.lanterns * 9; });
+  return <>{picks.map(([x, y, z], i) => <pointLight key={i} ref={(el) => { refs.current[i] = el; }} position={[x + 0.5, y + 0.3, z + 0.5]} color="#ffb860" intensity={5} distance={live.lanterns > 0.5 ? 9 : 6} decay={2} />)}</>;
 }

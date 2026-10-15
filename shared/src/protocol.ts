@@ -17,6 +17,8 @@ export interface JoinOptions {
   /** Anonymous id used only when the server runs without JWT verification (local development). */
   profileId?: string;
   protocolVersion: number;
+  /** Settings chosen by the room's creator (stored with the match); applied when the room is created. */
+  roomSettings?: Record<string, unknown>;
 }
 
 /** Per-player transform sent in every `state` message. */

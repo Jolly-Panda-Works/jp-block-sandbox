@@ -160,6 +160,27 @@ The server simulates everything below, so every player sees the same bots and an
   A biome whose animals are all off is not built. For example, with no ducks there is no pond, and with no pandas there is no bamboo grove. `animalsPerKind` (1–6, default 2) sets how many of each.
 
 
+### Day and night
+
+The server owns the clock, so everyone has the same time. The HUD shows ☀️ / 🌙 with the time and day number, for example `08:30 · Day 1`.
+
+- **Sky and light:** sunrise and sunset colour the sky and light. At night a moon and stars appear, and lanterns glow brighter.
+- **Night life:** most animals rest at night (ducks and bees keep going). Roosters crow at sunrise, and bots say good night and good morning.
+- **Settings:** `dayLengthMin` (default 20; 0 = time stands still) and `startHour` (default 8).
+
+### Room settings (lobby → Create a room → ⚙️ Settings)
+
+| Group | Settings |
+|---|---|
+| Room | players 1–8, session length |
+| Time | day length, start time |
+| Bots | wandering bots, when a bot joins an unanswered invite (or never) |
+| Animals | which animals (biomes without any chosen animal are left out), how many of each |
+| Chat | on / off |
+| Advanced | world seed, invite delay, mini-game turn times |
+
+The settings are stored with the room on the backend and applied by the game server when the room starts, on top of the dashboard Custom settings.
+
 ## Controls
 
 **Desktop:**

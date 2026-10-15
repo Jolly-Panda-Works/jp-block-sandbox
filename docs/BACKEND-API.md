@@ -37,14 +37,14 @@ Build-time setting: `VITE_API_AUTH=bearer|cookie`.
 | 2 | `GET /api/v1/client/me` | – | `{ "id": "<uuid>", "username": "…" }` | `VITE_ME_PATH` |
 | 3 | `PATCH /api/v1/client/me` | `{ "username": "…" }` | the updated user (name changed in Settings) | `VITE_ME_PATH` |
 | 4a | `GET /api/v1/client/multiplayer/games/blocksy/matches` | – | `[ Room, … ]` (or `{ items }`, `{ matches }`, `{ rooms }`) — open Blocksy matches | `VITE_ROOMS_PATH` (`{game}` = game key) |
-| 4b | `POST /api/v1/client/multiplayer/games/blocksy/matches` | `{ "name": "…", "maxPlayers": 2..8 }` | `Room` (the new match) | same as 4a |
+| 4b | `POST /api/v1/client/multiplayer/games/blocksy/matches` | `{ "name": "…", "maxPlayers": 1..8, "settings": { … } }` | `Room` (the new match, **including `settings`**) | same as 4a |
 | 5 | `GET /api/v1/client/multiplayer/matches/{id}` | – | `Room`, or `404` | `VITE_ROOM_PATH` |
 | ✓ | `POST /api/v1/client/realtime/token` *(exists)* | `{ "multiplayerId": "<uuid>" }` | `{ "wsUrl", "jwt", "expiresAt" }` | `VITE_TOKEN_PATH` |
 
 `Room` object:
 
 ```json
-{ "id": "<match uuid>", "name": "Ali's island", "maxPlayers": 8, "playerCount": 3 }
+{ "id": "<match uuid>", "name": "Ali's island", "maxPlayers": 8, "playerCount": 3, "settings": { "animals": ["cow", "duck"], "dayLengthMin": 20, "ambientBots": 4 } }
 ```
 
 Accepted variants:
@@ -59,6 +59,16 @@ Accepted variants:
 - **`playerCount` must be live** (players currently in the room). The game disables Join when `playerCount >= maxPlayers`. The game server publishes the live count as room metadata (`{ multiplayerId, players, maxPlayers }`), so the backend can read it from the Colyseus matchmaker. Alternatively, it can track it from token issuance and results.
 - **Status codes on the token request:** return `403` when a room is full, and `404` when the match doesn't exist. The game shows a message for each.
 - **Room settings:** a match created with `maxPlayers` should report that value as `playerMax` in `GET /internal/realtime/game-config/{id}`. The game server takes its capacity from there.
+
+## Room settings
+
+`settings` is a small JSON object of at most a few KB, chosen by the room's creator: animals, day length, start time, bots, session length, chat and mini-game timers.
+
+- **Backend:** stores it with the match and returns it unchanged in every `Room` object. No validation is needed on the backend.
+- **Clients:** every client sends it when joining.
+- **Game server:** clamps and applies it when it creates the room, on top of the dashboard Custom settings.
+
+Keys and limits are in `shared/src/roomSettings.ts`.
 
 ## Reference implementation
 

@@ -5,6 +5,7 @@
  * The contract the backend must offer is documented in docs/BACKEND-API.md.
  */
 import { config } from './config';
+import { sanitizeRoomSettings, type RoomSettings } from '@jp/blocksy-shared';
 
 const env = (import.meta.env ?? {}) as Record<string, string | undefined>;
 const GAME = env.VITE_ROOM_NAME || 'blocksy';
@@ -16,7 +17,7 @@ const paths = {
 };
 
 /** A room = a backend match of this game. */
-export interface RoomInfo { id: string; name: string; maxPlayers: number; playerCount: number }
+export interface RoomInfo { id: string; name: string; maxPlayers: number; playerCount: number; settings?: Partial<RoomSettings> }
 export interface UserInfo { id: string; name: string }
 
 export const MAX_ROOM_PLAYERS = 8;
@@ -90,6 +91,7 @@ function toRoom(raw: unknown): RoomInfo | null {
     name: str(o.name, o.title) || 'Blocksy room',
     maxPlayers: Math.max(1, Math.min(MAX_ROOM_PLAYERS, Number.isNaN(max) ? MAX_ROOM_PLAYERS : max)),
     playerCount: Math.max(0, Number.isNaN(count) ? 0 : count),
+    settings: o.settings && typeof o.settings === 'object' ? sanitizeRoomSettings(o.settings) : undefined,
   };
 }
 
@@ -143,8 +145,8 @@ export const platform = {
     }
   },
 
-  async createRoom(name: string, maxPlayers: number): Promise<RoomInfo> {
-    const r = toRoom(await call('POST', paths.rooms, { name, maxPlayers: Math.max(2, Math.min(MAX_ROOM_PLAYERS, Math.round(maxPlayers))) }));
+  async createRoom(name: string, maxPlayers: number, settings: Partial<RoomSettings> = {}): Promise<RoomInfo> {
+    const r = toRoom(await call('POST', paths.rooms, { name, maxPlayers: Math.max(1, Math.min(MAX_ROOM_PLAYERS, Math.round(maxPlayers))), settings: sanitizeRoomSettings(settings) }));
     if (!r) throw new ApiError('The backend did not return the new room.', 0);
     return r;
   },

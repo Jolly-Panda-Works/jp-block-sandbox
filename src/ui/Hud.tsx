@@ -8,7 +8,8 @@ import { lockPointer, togglePanel } from '../game/pointer';
 import { LookArea, TouchControls } from './TouchControls';
 import { MiniGameOverlay } from './MiniGameOverlay';
 import { send } from '../net/network';
-import { ANIMAL_ICON, isAnimalKind, isBotId, miniGameInfo } from '@jp/blocksy-shared';
+import { ANIMAL_ICON, formatClock, isAnimalKind, isBotId, isNight, miniGameInfo } from '@jp/blocksy-shared';
+import { currentClock } from '../net/network';
 
 /** E near an invite → accept (after the delay); near a running game → watch. Returns true if handled. */
 export function interactMiniGame(): boolean {
@@ -23,6 +24,13 @@ export function interactMiniGame(): boolean {
   if (s.nearGame) { send('mgSpectate', { gameId: s.nearGame.id }); return true; }
   if (s.nearAnimal) { send('pet', { animalId: s.nearAnimal.id }); return true; }
   return false;
+}
+
+/** In-game time of day: ☀️ 08:30 · Day 1 (🌙 at night). */
+function WorldTime() {
+  const [c, setC] = useState(currentClock());
+  useEffect(() => { const h = setInterval(() => setC(currentClock()), 1000); return () => clearInterval(h); }, []);
+  return <div className="card world-time" title="In-game time">{isNight(c.hour) ? '🌙' : '☀️'} {formatClock(c.hour)} · Day {c.day}</div>;
 }
 
 export function Keycap({ k }: { k: string }) { return <span className="keycap">{k}</span>; }
@@ -40,6 +48,7 @@ export function Hud() {
   return (
     <div className="hud">
       {(s.mg || (s.lobby && s.lobby.hostId !== s.sessionId)) && !s.touch && <LookArea />}
+      {playing && <WorldTime />}
       {s.touch && playing && <TouchControls />}
       <MiniGameOverlay />
       {s.timeLeftMs > 0 && <div className="card session-timer">⏱ {formatTime(s.timeLeftMs)}</div>}

@@ -152,3 +152,24 @@ test('animal settings, variants and colours', () => {
     assert.match(variantColors(k, v).main, /^#[0-9a-f]{6}$/);
   }
 });
+
+import { clockAt, skyAt, isNight, formatClock, sanitizeRoomSettings } from '../src/index';
+
+test('day / night: clock, sun path, night sky', () => {
+  assert.deepEqual(clockAt(8, 0, 999999), { hour: 8, day: 1 }, 'frozen time');
+  const c = clockAt(8, 24 * 60_000, 6 * 60_000);   // 24-minute day, 6 minutes later → 6 hours later
+  assert.ok(Math.abs(c.hour - 14) < 1e-9 && c.day === 1);
+  assert.equal(clockAt(20, 24 * 60_000, 6 * 60_000).day, 2, 'past midnight is day 2');
+  assert.ok(skyAt(12).sunDir[1] > 0.9, 'sun high at noon');
+  assert.ok(skyAt(0).sunDir[1] < 0 && skyAt(0).lightDir[1] > 0, 'at midnight the light comes from the moon above');
+  assert.ok(skyAt(0).stars === 1 && skyAt(12).stars === 0 && skyAt(23).lanterns === 1);
+  assert.ok(skyAt(12).lightIntensity > skyAt(0).lightIntensity * 5);
+  assert.ok(isNight(2) && !isNight(12));
+  assert.equal(formatClock(14.5), '14:30');
+});
+
+test('room settings are clamped and filtered', () => {
+  assert.deepEqual(sanitizeRoomSettings({ animals: ['cow', 'dragon'], ambientBots: 99, dayLengthMin: -5, chatEnabled: false, hack: 1, startHour: 'x' }),
+    { animals: ['cow'], chatEnabled: false, ambientBots: 8, dayLengthMin: 0 });
+  assert.deepEqual(sanitizeRoomSettings('nope'), {});
+});
