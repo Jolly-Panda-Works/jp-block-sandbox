@@ -1,0 +1,117 @@
+{
+ "08b291d2-9109-455a-9e44-c5024997a56d": {
+  "coins": 0,
+  "owned": [
+   8,
+   7,
+   2,
+   9,
+   10,
+   15,
+   14,
+   19,
+   20,
+   18,
+   17,
+   23,
+   22,
+   24
+  ],
+  "hotbar": [
+   8,
+   7,
+   2,
+   9,
+   23,
+   15,
+   22,
+   17,
+   20
+  ],
+  "appearance": {
+   "skin": "#edb98a",
+   "hair": "bald",
+   "hairColor": "#c89b5a",
+   "shirt": "tank",
+   "shirtColor": "#2a2a2e",
+   "pants": "shorts",
+   "pantsColor": "#f2c230",
+   "shoes": "boots",
+   "shoeColor": "#2e3a7a",
+   "hat": "cap",
+   "hatColor": "#f2c230",
+   "glasses": "round",
+   "glassesColor": "#16a085",
+   "watch": "none",
+   "watchColor": "#c0392b"
+  }
+ },
+ "e47cf1a8-d382-4ae1-85de-0bcbd8406fe0": {
+  "coins": 0,
+  "owned": [
+   23,
+   24,
+   25
+  ],
+  "hotbar": [
+   23,
+   24,
+   25,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "appearance": {
+   "skin": "#e0ac7e",
+   "hair": "short",
+   "hairColor": "#5a3a22",
+   "shirt": "tshirt",
+   "shirtColor": "#2bb3a8",
+   "pants": "jeans",
+   "pantsColor": "#2e3a7a",
+   "shoes": "sneakers",
+   "shoeColor": "#6b6f78",
+   "hat": "none",
+   "hatColor": "#c0392b",
+   "glasses": "none",
+   "glassesColor": "#222222",
+   "watch": "none",
+   "watchColor": "#333333"
+  }
+ },
+ "0792a792-3ddc-4d85-9721-6b5a3d4dce83": {
+  "coins": 0,
+  "owned": [],
+  "hotbar": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "appearance": {
+   "skin": "#e0ac7e",
+   "hair": "short",
+   "hairColor": "#5a3a22",
+   "shirt": "tshirt",
+   "shirtColor": "#2bb3a8",
+   "pants": "jeans",
+   "pantsColor": "#2e3a7a",
+   "shoes": "sneakers",
+   "shoeColor": "#6b6f78",
+   "hat": "none",
+   "hatColor": "#c0392b",
+   "glasses": "none",
+   "glassesColor": "#222222",
+   "watch": "none",
+   "watchColor": "#333333"
+  }
+ }
+}

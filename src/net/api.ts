@@ -1,0 +1,54 @@
+import { config } from './config';
+
+/** What the game needs to join the realtime server. */
+export interface RealtimeCredentials { wsUrl: string; jwt?: string }
+
+/** Bearer token for the backend: from ?token=... (stored for next time) or localStorage. */
+function bearerToken(): string | null {
+  try {
+    const q = new URLSearchParams(location.search).get('token');
+    if (q) localStorage.setItem('blocksy.authToken', q);
+    return q ?? localStorage.getItem('blocksy.authToken');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Asks the platform backend for a realtime token:
+ *   POST {apiBaseUrl}/client/realtime/token  { multiplayerId }  →  { wsUrl, jwt }
+ * Also accepts `{ data: { … } }` envelopes and `token`/`accessToken` instead of `jwt`.
+ * A token passed in the page URL (?jwt=…) is used directly.
+ */
+export async function getRealtimeCredentials(multiplayerId: string): Promise<RealtimeCredentials> {
+  if (config.jwt) return { wsUrl: config.wsUrl, jwt: config.jwt };
+  if (!config.apiBaseUrl) {
+    throw new Error('No realtime token: set VITE_API_BASE_URL (Rastaar backend) or open the game with ?jwt=… from the platform.');
+  }
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' };
+  if (config.apiAuth === 'bearer') {
+    const t = bearerToken();
+    if (t) headers.Authorization = `Bearer ${t}`;
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${config.apiBaseUrl}${config.tokenPath}`, {
+      method: 'POST',
+      headers,
+      credentials: config.apiAuth === 'cookie' ? 'include' : 'same-origin',
+      body: JSON.stringify({ multiplayerId }),
+    });
+  } catch {
+    throw new Error(`Could not reach the game backend (${config.apiBaseUrl}).`);
+  }
+  if (res.status === 401 || res.status === 403) throw new Error('Please sign in to play (backend refused the token request).');
+  if (!res.ok) throw new Error(`Backend error ${res.status} while requesting a realtime token.`);
+
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  const data = (body.data && typeof body.data === 'object' ? body.data : body) as Record<string, unknown>;
+  const jwt = [data.jwt, data.token, data.accessToken].find((v): v is string => typeof v === 'string' && v.length > 0);
+  const wsUrl = typeof data.wsUrl === 'string' && data.wsUrl ? data.wsUrl : config.wsUrl;
+  if (!jwt) throw new Error('Backend response did not contain a realtime token.');
+  return { wsUrl, jwt };
+}

@@ -6,7 +6,7 @@ import {
   SURFACE_Y, FACE_CORNERS, FACE_DIRS, buildChunkMesh, blockFaceUv, TILE_KEYS, paintTile, paintAtlas, renderIcon,
   ATLAS_WIDTH, ATLAS_HEIGHT, createProfile, purchase, sanitizeProfile, assignSlot, autoAssign, listings,
   sanitizeAppearance, DEFAULT_APPEARANCE, buildAvatarParts, sanitizeMessage, sanitizeName, cycle, HAIR_STYLES,
-  randomAppearance, createRng, HOTBAR_SLOTS, isToolKind,
+  randomAppearance, createRng, HOTBAR_SLOTS, isToolKind, sanitizeMultiplayerId, ROOM_NAME, PROTOCOL_VERSION,
 } from '../src/index';
 
 const stone = blockId('stone'), grass = blockId('grass'), flower = blockId('white_flower'), lantern = blockId('lantern');
@@ -184,6 +184,15 @@ test('shop: buy once, own forever, no quantities; hotbar auto-assign and swap', 
   assert.deepEqual(p.hotbar.slice(0, 2), [grass, stone], 'swap keeps ids unique');
   assert.equal(autoAssign(p.hotbar, grass), 0);
   assert.ok(listings('blocks').length > 10 && listings('decor').length >= 6);
+});
+
+test('protocol constants and lobby ids', () => {
+  assert.equal(ROOM_NAME, 'blocksy');
+  assert.ok(Number.isInteger(PROTOCOL_VERSION) && PROTOCOL_VERSION > 0);
+  assert.equal(sanitizeMultiplayerId('team-42_A'), 'team-42_A');
+  assert.equal(sanitizeMultiplayerId('../etc'), 'public');
+  assert.equal(sanitizeMultiplayerId(undefined), 'public');
+  assert.equal(sanitizeMultiplayerId('x'.repeat(65)), 'public');
 });
 
 test('tool kinds', () => {

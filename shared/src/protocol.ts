@@ -4,8 +4,32 @@ import type { IslandLayout } from './island';
 import type { EmojiId, EmoteId } from './social';
 import type { PlacementResult, RemovalResult } from './placement';
 
-/** Options sent with joinOrCreate. */
-export interface JoinOptions { name: string; profileId: string }
+/**
+ * Options for `client.joinOrCreate(ROOM_NAME, options)`.
+ * `jwt` comes from the platform backend (POST /client/realtime/token { multiplayerId }) and is verified
+ * by the game server. Players with the same `multiplayerId` share a room.
+ */
+export interface JoinOptions {
+  jwt?: string;
+  multiplayerId: string;
+  username: string;
+  /** Anonymous id used only when the server runs without JWT verification (local development). */
+  profileId?: string;
+  protocolVersion: number;
+}
+
+/** Per-player transform sent in every `state` message. */
+export interface PlayerSnapshot {
+  id: string;
+  x: number; y: number; z: number; yaw: number;
+  speed: number; grounded: boolean;
+  held: number; tool: ToolKind;
+  /** Incremented on every place/remove so others can play the arm swing. */
+  action: number;
+}
+
+/** Rarely-changing player data, sent on join and when it changes. */
+export interface PlayerMeta { id: string; name: string; appearance: Appearance }
 
 /** Client → server messages. */
 export interface ClientMessages {
@@ -18,15 +42,28 @@ export interface ClientMessages {
   chat: { text: string };
   emoji: { id: EmojiId };
   emote: { id: EmoteId };
-  swing: Record<string, never>;
 }
 
 /** Server → client messages. */
 export interface ServerMessages {
-  /** Join snapshot: RLE-encoded grid + protection mask, island layout and the player's profile. */
-  init: { size: [number, number, number]; cells: number[]; protectedCells: number[]; layout: IslandLayout; profile: ProfileData; spawn: { x: number; y: number; z: number; yaw: number } };
+  /** Join snapshot: RLE-encoded grid + protection mask, layout, your profile and everyone's meta. */
+  init: {
+    protocolVersion: number;
+    you: string;
+    size: [number, number, number];
+    cells: number[];
+    protectedCells: number[];
+    layout: IslandLayout;
+    profile: ProfileData;
+    spawn: { x: number; y: number; z: number; yaw: number };
+    players: PlayerMeta[];
+  };
+  /** Broadcast at ~15 Hz: transforms of every player in the room (including you). */
+  state: { t: number; players: PlayerSnapshot[] };
+  playerMeta: PlayerMeta;
+  playerLeft: { id: string };
   blockSet: { x: number; y: number; z: number; id: number };
-  /** Sent only to the editing client when an edit was refused (the cell's real id is included). */
+  /** Sent only to the editing client when an edit was refused (includes the cell's real id). */
   editRejected: { x: number; y: number; z: number; id: number; reason: PlacementResult | RemovalResult };
   profile: { profile: ProfileData; result?: PurchaseResult };
   chat: { sessionId: string; text: string };

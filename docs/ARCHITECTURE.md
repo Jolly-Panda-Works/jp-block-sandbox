@@ -1,8 +1,10 @@
 # Blocksy — Architecture
 
+The game client and the game server are **separate repositories**. Both contain an identical copy of `shared/` (rules + protocol); `PROTOCOL_VERSION` guards against mismatches. The client obtains `wsUrl` + `jwt` from the platform backend and joins room `blocksy` with `{ jwt, multiplayerId, username, protocolVersion }`.
+
 ```mermaid
 flowchart LR
-  subgraph shared["@jp/block-sandbox-shared (pure TS)"]
+  subgraph shared["shared/ (pure TS, vendored in both repos)"]
     G[BlockGrid] --- R[voxelRaycast]
     G --- P[placement rules]
     G --- PH[moveBody physics]
@@ -10,11 +12,12 @@ flowchart LR
     I[generateIsland] --> G
     E[economy / profile] --- A[appearance + avatarParts]
   end
-  subgraph server["Colyseus server"]
-    IR[IslandRoom] --> G
+  subgraph server["blocksy-server repo (Colyseus)"]
+    IR[BlocksyRoom] --> G
     IR --> PS[ProfileStore JSON]
-    IR --> ST[(IslandState schema: players)]
+    IR --> AU[AuthVerifier: JWT]
   end
+  API[Platform backend<br/>POST /client/realtime/token] -->|wsUrl + jwt| NET
   subgraph client["React Three Fiber client"]
     NET[network.ts] -->|init snapshot, blockSet| CW[ClientWorld grid]
     CW -->|dirty chunks| WM[WorldMesh]
@@ -88,7 +91,8 @@ Moving cancels an emote.
 
 | Data | Channel |
 |---|---|
-| Player transform, name, appearance (sanitised JSON), held block, action counter | Colyseus schema state (`PlayerState`), patched at 20 Hz |
+| Player transforms, held block/tool, action counter | `state` message broadcast at 15 Hz (no Colyseus schema) |
+| Player name and appearance | `init.players`, then `playerMeta` / `playerLeft` |
 | Blocks | `init` snapshot + `blockSet` / `editRejected` messages |
 | Chat, emoji, emotes | Broadcast messages (server sanitises text, rate-limits chat, validates ids) |
 | Profile (owned blocks, hotbar, appearance) | `profile` message; persisted by `ProfileStore` (debounced atomic JSON writes) |

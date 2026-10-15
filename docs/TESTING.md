@@ -46,7 +46,7 @@ Library versions are pinned to the Colyseus **0.15** line (`colyseus@0.15`, `@co
 
 ## Manual verification checklist
 
-Run `npm run dev`, then open two browser windows and check each item:
+Start `blocksy-server` with `AUTH_REQUIRED=false` (`npm run dev`), then run `npm run dev` in this repo and open two browser windows. Check each item:
 
 1. Join from both windows. The island card shows 2 / 8 players and each player sees the other with a name tag.
 2. WASD and Shift movement; jump onto a 1-block mound; walk into walls (no tunnelling); jump under a ceiling.
@@ -62,3 +62,12 @@ Run `npm run dev`, then open two browser windows and check each item:
 12. Reload the page. Owned blocks, hotbar and appearance persist; world edits persist while the room is alive.
 13. Press Esc: the pause menu opens. Resume re-captures the cursor.
 14. The browser console shows no errors.
+
+## Platform integration checklist (once the backend address is known)
+
+1. Set `VITE_API_BASE_URL`, remove `.env.development` (or set `VITE_WS_URL=wss://gameserver.rastar.ir`), then run `npm run dev`.
+2. The join screen requests `POST /client/realtime/token`. Check the request and its `{ wsUrl, jwt }` response in the browser Network tab.
+3. On the server, configure one of `JWT_SECRET`, `JWT_PUBLIC_KEY` or `JWT_JWKS_URL`, and set `AUTH_REQUIRED=true`. The server log shows `auth: JWT (...)`.
+4. A valid token joins. An expired or tampered token shows "Invalid or expired realtime token" on the join screen.
+5. Two users with the same `?multiplayerId=` share a room; different ids get different rooms.
+6. Change `PROTOCOL_VERSION` on only one side: the join screen shows "Game version mismatch".

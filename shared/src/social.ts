@@ -26,6 +26,11 @@ export function sanitizeMessage(raw: unknown, max = MAX_MESSAGE_LENGTH): string 
   return Array.from(cleaned).slice(0, max).join('').trim();
 }
 
+/** Room/lobby ids from the backend: 1–64 chars of [A-Za-z0-9_-], otherwise the default lobby. */
+export function sanitizeMultiplayerId(raw: unknown, fallback = 'public'): string {
+  return typeof raw === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(raw) ? raw : fallback;
+}
+
 /** Player display names: sanitised, never empty. */
 export function sanitizeName(raw: unknown): string {
   const n = sanitizeMessage(raw, MAX_NAME_LENGTH);
