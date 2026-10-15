@@ -15,10 +15,15 @@ export function lockPointer(): void {
   if (useGame.getState().touch) return; // touch mode never captures the pointer
   const c = document.querySelector<HTMLCanvasElement>('.game canvas, canvas.game');
   if (!c || document.pointerLockElement === c) return;
+  // Raw mouse input (no OS acceleration) where supported: steadier camera and fewer bogus jumps.
+  const plain = () => {
+    try { (c.requestPointerLock() as unknown as Promise<void> | undefined)?.catch?.(() => undefined); } catch { /* not allowed right now */ }
+  };
   try {
-    const r = c.requestPointerLock() as unknown as Promise<void> | undefined;
-    r?.catch?.(() => undefined);
-  } catch { /* not allowed right now: the "Click to play" overlay covers it */ }
+    const req = c.requestPointerLock as unknown as (o?: { unadjustedMovement?: boolean }) => Promise<void> | undefined;
+    const r = req.call(c, { unadjustedMovement: true });
+    if (r && typeof r.catch === 'function') r.catch(() => plain());   // not supported → normal lock
+  } catch { plain(); }
 }
 
 /** Opens a panel (freeing the cursor) or closes the open one (re-locking when the browser allows it). */

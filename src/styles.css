@@ -353,5 +353,6 @@ details summary { cursor: pointer; text-align: left; }
 .free-cam-hint { position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%); padding: 6px 14px; font-size: 13px; font-weight: 700; pointer-events: none; }
 
 /* Free camera is only for looking at the world: hide everything the player can't use there. */
-.hud.free-cam .island, .hud.free-cam .top-buttons, .hud.free-cam .crosshair, .hud.free-cam .prompt,
+/* (the island card and the ⚙️ settings button stay) */
+.hud.free-cam .top-buttons button:not(.settings-btn), .hud.free-cam .crosshair, .hud.free-cam .prompt,
 .hud.free-cam .hints, .hud.free-cam .mode, .hud.free-cam .hotbar, .hud.free-cam .hands, .hud.free-cam .click-to-play { display: none !important; }

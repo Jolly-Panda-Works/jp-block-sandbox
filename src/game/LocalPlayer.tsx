@@ -79,7 +79,7 @@ export function LocalPlayer() {
   const armInner = useRef<THREE.Group>(null);
   const st = useRef({
     blend: 1, rig: newCameraRig(TP_DISTANCE, SHOULDER), lastGround: -9, lastJump: -9, nextRepeat: 0, sendAt: 0, bodyYaw: 0,
-    faceAimUntil: 0, stepDist: 0, freeOn: false, freePos: new THREE.Vector3(), freeLast: new THREE.Vector3(), freeExitAt: -9, nearKey: '', offKey: '', framedFor: '', nearby: null as StallInfo | null, hidden: false, layerKey: '', lastLook: null as unknown, armSwing: -9, bob: 0,
+    faceAimUntil: 0, stepDist: 0, bodyHidden: false, freeOn: false, freePos: new THREE.Vector3(), freeLast: new THREE.Vector3(), freeExitAt: -9, nearKey: '', offKey: '', framedFor: '', nearby: null as StallInfo | null, hidden: false, layerKey: '', lastLook: null as unknown, armSwing: -9, bob: 0,
   });
 
   useEffect(() => { camera.layers.disable(1); }, [camera]);
@@ -216,7 +216,10 @@ export function LocalPlayer() {
     if (avatar.current) {
       avatar.current.position.set(b.x, b.y, b.z);
       avatar.current.rotation.set(0, s.bodyYaw, 0);
-      const hide = camera.position.distanceTo(eye) < HIDE_BODY_BELOW;
+      // Hide the body when the camera is very close, with a margin so it doesn't flicker at the threshold.
+      const camToEye = camera.position.distanceTo(eye);
+      if (s.bodyHidden ? camToEye > HIDE_BODY_BELOW + 0.25 : camToEye < HIDE_BODY_BELOW) s.bodyHidden = !s.bodyHidden;
+      const hide = s.bodyHidden;
       const key = `${hide}|${held}|${game.tool}`;
       if (key !== s.layerKey || s.lastLook !== appearance) {
         s.layerKey = key;

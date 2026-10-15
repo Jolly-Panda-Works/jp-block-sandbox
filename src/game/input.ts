@@ -10,6 +10,10 @@ const mousePressed = [false, false, false];
 let keyboardEnabled = true;
 
 /** Touch-control state written by <TouchControls> and merged into each frame's input. */
+import { filterMouse, mouseLockChanged, newMouseFilter } from './mouseFilter';
+
+const mouseFilter = newMouseFilter();
+
 export const touch = { moveX: 0, moveY: 0, lookDX: 0, lookDY: 0, jump: false, usePressed: false, useHeld: false, flyUp: false, flyDown: false };
 
 /** In touch mode the keyboard is ignored entirely (text fields keep working). */
@@ -35,8 +39,10 @@ export function installInput(onKey: (code: string) => void): () => void {
   const up = (e: KeyboardEvent) => held.delete(e.code);
   const move = (e: MouseEvent) => {
     if (!document.pointerLockElement) return;
-    mouseDX += e.movementX; mouseDY += e.movementY;
+    const [dx, dy] = filterMouse(mouseFilter, e.movementX, e.movementY, performance.now());
+    mouseDX += dx; mouseDY += dy;
   };
+  const lockChange = () => mouseLockChanged(mouseFilter, performance.now());
   const mdown = (e: MouseEvent) => {
     if (!document.pointerLockElement || e.button > 2) return;
     mouseHeld[e.button] = true; mousePressed[e.button] = true;
@@ -48,6 +54,7 @@ export function installInput(onKey: (code: string) => void): () => void {
   window.addEventListener('keydown', down);
   window.addEventListener('keyup', up);
   window.addEventListener('mousemove', move);
+  document.addEventListener('pointerlockchange', lockChange);
   window.addEventListener('mousedown', mdown);
   window.addEventListener('mouseup', mup);
   window.addEventListener('wheel', wh, { passive: true });
@@ -57,6 +64,7 @@ export function installInput(onKey: (code: string) => void): () => void {
     window.removeEventListener('keydown', down);
     window.removeEventListener('keyup', up);
     window.removeEventListener('mousemove', move);
+    document.removeEventListener('pointerlockchange', lockChange);
     window.removeEventListener('mousedown', mdown);
     window.removeEventListener('mouseup', mup);
     window.removeEventListener('wheel', wh);

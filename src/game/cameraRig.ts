@@ -40,6 +40,7 @@ export const CAM_TUNING = {
   easeOutDelay: 0.3,  // s
   anticipate: 0.55,   // rad — the most it looks ahead (≈ 31°)
   lookAhead: 0.35,    // s — how far ahead in time it looks while turning
+  wallClearance: 1.0,  // m — distance the pivot keeps from a wall on the shoulder side
 };
 const SIDE_IN_RATE = 14, SIDE_OUT_RATE = 4;
 
@@ -83,8 +84,16 @@ export function solveCamera(s: CameraRigState, i: CameraRigInput): Vec3 {
   s.lastX = hx; s.lastY = hy; s.lastZ = hz; s.init = true;
 
   // Shoulder offset (camera slightly to the right), shrunk smoothly next to a wall.
-  const sideFree = thickCast(i.head, i.right, i.shoulder + CAM_RADIUS + 0.1, 0.12, i.solid);
-  const wantShoulder = Math.max(0, Math.min(i.shoulder, sideFree - CAM_RADIUS - 0.1));
+  // The pivot sits over the right shoulder. Next to a wall on that side it moves away from the wall (even
+  // past the centre, toward the other shoulder), so the camera's line doesn't hug the wall: turning there
+  // would otherwise make the camera rush in.
+  const T0 = CAM_TUNING;
+  const reach = Math.max(i.shoulder, T0.wallClearance) + CAM_RADIUS + 0.1;
+  const sideFree = thickCast(i.head, i.right, reach, 0.12, i.solid);
+  const left: Vec3 = [-i.right[0], -i.right[1], -i.right[2]];
+  const otherFree = thickCast(i.head, left, i.shoulder + CAM_RADIUS + 0.1, 0.12, i.solid);
+  let wantShoulder = Math.min(i.shoulder, sideFree - T0.wallClearance);
+  wantShoulder = Math.max(wantShoulder, -i.shoulder, -(otherFree - CAM_RADIUS - 0.1));
   s.shoulder = teleported ? wantShoulder : smoothTo(s.shoulder, wantShoulder, wantShoulder < s.shoulder ? SIDE_IN_RATE : SIDE_OUT_RATE, i.dt);
   const pivot = add(i.head, i.right, s.shoulder);
 

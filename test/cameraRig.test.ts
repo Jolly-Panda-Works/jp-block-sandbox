@@ -130,3 +130,27 @@ test('looking up and down against the ground: no jumps, never inside the ground'
     }
   }
 });
+
+test('orbiting the character next to walls, in corners, between trees: no extra jumps beyond the orbit itself', () => {
+  const scenes: SolidFn[] = [
+    (_x, y) => y <= 4,
+    (x, y) => y <= 4 || (x === -1 && y <= 9),                                           // wall 0.5 m away
+    (x, y, z) => y <= 4 || ((x === -1 || z === -1) && y <= 9),                          // corner
+    (x, y, z) => y <= 4 || (((x === 2 && z === 1) || (x === -1 && z === -2) || (x === 1 && z === -3)) && y <= 9),
+  ];
+  for (const solid of scenes) for (const speed of [1.5, 3, -3, 5]) {
+    const r = newCameraRig(4, 0.45);
+    let prev: number[] | null = null, turned = 0;
+    for (let f = 0; f < 480; f++) {
+      turned += speed * Math.min(1, (f * dt) / 0.2) * dt;
+      const pitch = 0.35 + Math.sin(f * 0.02) * 0.3;
+      const cam = solveCamera(r, { head: [0.5, 6.55, 0.5], dir: [Math.sin(turned) * Math.cos(pitch), -Math.sin(pitch), Math.cos(turned) * Math.cos(pitch)], right: [-Math.cos(turned), 0, Math.sin(turned)], solid, maxDist: 4, shoulder: 0.45, dt, t: f * dt });
+      if (prev) {
+        const extra = Math.hypot(cam[0] - prev[0], cam[1] - prev[1], cam[2] - prev[2]) - (r.dist * Math.abs(speed) * dt * 1.15 + 0.03);
+        assert.ok(extra <= 0.2, `camera glitch of ${extra.toFixed(2)} m at ${speed} rad/s`);
+      }
+      prev = cam;
+      assert.ok(!solid(Math.floor(cam[0]), Math.floor(cam[1]), Math.floor(cam[2])), 'inside a block');
+    }
+  }
+});
