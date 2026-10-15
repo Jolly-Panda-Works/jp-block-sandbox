@@ -16,7 +16,12 @@ const CONTROLS: [string, string][] = [
 ];
 
 export function PauseMenu() {
-  const { sensitivity, invertY, multiplayerId, showToast, name, particles } = useGame();
+  const { sensitivity, invertY, multiplayerId, showToast, name, particles, camDistance, cameraMode } = useGame();
+  const setCamDistance = (v: number) => {
+    const d = Math.min(8, Math.max(2, Math.round(v * 2) / 2));
+    useGame.setState({ camDistance: d });
+    try { localStorage.setItem('blocksy.camDistance', String(d)); } catch { /* private mode */ }
+  };
   const setParticles = (on: boolean) => {
     useGame.setState({ particles: on });
     try { localStorage.setItem('blocksy.particles', on ? 'on' : 'off'); } catch { /* private mode */ }
@@ -54,6 +59,17 @@ export function PauseMenu() {
           <span>Particles</span>
           <input type="checkbox" checked={particles} onChange={(e) => setParticles(e.target.checked)} />
         </label>
+        <div className="setting">
+          <span>Camera</span>
+          {(['first', 'third', 'free'] as const).map((m) => (
+            <button key={m} className={cameraMode === m ? 'primary' : ''} onClick={() => useGame.setState({ cameraMode: m })}>{m === 'first' ? '1st person' : m === 'third' ? '3rd person' : 'Free'}</button>
+          ))}
+        </div>
+        <div className="setting">
+          <span>3rd-person distance</span>
+          <input type="range" min={2} max={8} step={0.5} value={camDistance} onChange={(e) => setCamDistance(Number(e.target.value))} />
+          <b>{camDistance.toFixed(1)} m</b>
+        </div>
         <div className="setting">
           <span>Mouse sensitivity</span>
           <button onClick={() => useGame.setState({ sensitivity: Math.max(0.2, +(sensitivity - 0.1).toFixed(1)) })}>−</button>

@@ -67,6 +67,8 @@ export function installInput(onKey: (code: string) => void): () => void {
 
 export interface FrameInput {
   moveX: number; moveY: number; jump: boolean; sprint: boolean;
+  /** Held Space / Shift (free camera up / down). */
+  up: boolean; down: boolean;
   lookX: number; lookY: number; wheel: number;
   primaryPressed: boolean; primaryHeld: boolean; secondaryPressed: boolean; secondaryHeld: boolean;
 }
@@ -80,6 +82,7 @@ export function consumeInput(): FrameInput {
     moveY: clamp1((k('KeyW') ? 1 : 0) - (k('KeyS') ? 1 : 0) + touch.moveY),
     jump: pressed.has('Space') || touch.jump,
     sprint: k('ShiftLeft') || k('ShiftRight'),
+    up: k('Space'), down: k('ShiftLeft') || k('ShiftRight'),
     lookX: mouseDX + touch.lookDX, lookY: mouseDY + touch.lookDY, wheel,
     primaryPressed: mousePressed[0] || touch.usePressed, primaryHeld: mouseHeld[0] || touch.useHeld,
     secondaryPressed: mousePressed[2], secondaryHeld: mouseHeld[2],

@@ -344,3 +344,10 @@ textarea:focus { border-color: var(--accent); }
 .animal-pick.on { opacity: 1; outline: 2px solid var(--accent); }
 .room-summary { font-size: 12px; color: var(--sub); }
 .seed-row { display: flex; gap: 6px; }
+
+/* One-click test login (bookmarklet) */
+.bookmark-box { display: flex; flex-direction: column; gap: 6px; background: rgba(61, 219, 185, 0.12); border: 1px solid var(--accent-dark); border-radius: 12px; padding: 10px 12px; text-align: left; }
+.bookmarklet { display: inline-block; margin: 4px 0 0 6px; padding: 6px 12px; border-radius: 10px; background: var(--accent); color: #0b2a24; font-weight: 800; text-decoration: none; cursor: grab; }
+details summary { cursor: pointer; text-align: left; }
+
+.free-cam-hint { position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%); padding: 6px 14px; font-size: 13px; font-weight: 700; pointer-events: none; }

@@ -2463,6 +2463,53 @@ class AmbientLife {
   /** Pond surface for swimmers: "x,z" → height. */
   private readonly swim = new Map<string, number>();
   private readonly cells: [number, number][] = [];
+  private grid!: BlockGrid;
+  private notGround!: Set<number>;
+  private waterId = 0;
+
+  /** Recomputes where one column can be walked / swum on (after the world changed there). */
+  private updateColumn(x: number, z: number): void {
+    const key = `${x},${z}`;
+    this.walk.delete(key);
+    this.swim.delete(key);
+    const g = this.grid, maxY = SURFACE_Y + 4;
+    for (let y = 1; y <= maxY; y++) {
+      const id = g.get(x, y, z), above = g.get(x, y + 1, z);
+      const ground = getBlock(id);
+      if (!ground?.solid || ground.shape !== 'cube' || this.notGround.has(id)) continue;
+      if (above === this.waterId) {
+        let top = y + 1;
+        while (g.get(x, top + 1, z) === this.waterId) top++;
+        if (g.get(x, top + 1, z) === AIR) this.swim.set(key, top + 0.65);
+        return;
+      }
+      const feet = getBlock(above), head = getBlock(g.get(x, y + 2, z));
+      if (feet?.solid || head?.solid) continue;
+      this.walk.set(key, y + 1);
+      return;
+    }
+  }
+
+  /** A block was placed or removed: walkers there fall into the hole / step onto the new block. */
+  onBlockChanged(x: number, z: number): void {
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) this.updateColumn(x + dx, z + dz);
+  }
+
+  /** Gravity for bots and animals: fall into holes, never hover where the ground used to be. */
+  private settle(w: Walker & { fall?: number }, dt: number, flyer: boolean, swimmer: boolean): void {
+    const key = `${Math.floor(w.x)},${Math.floor(w.z)}`;
+    const ground = this.walk.get(key) ?? (swimmer ? this.swim.get(key) : undefined);
+    if (ground === undefined) return;
+    const target = flyer ? ground + 1.1 : ground;
+    if (w.y > target + 0.01) {
+      if (flyer) { w.y = Math.max(target, w.y - 2 * dt); return; }
+      w.fall = Math.min(20, (w.fall ?? 0) + 25 * dt);
+      w.y = Math.max(target, w.y - w.fall * dt);
+    } else {
+      w.fall = 0;
+      if (w.y < target - 0.01) w.y = target;   // a block appeared underneath: stand on it
+    }
+  }
 
   constructor(
     grid: BlockGrid,
@@ -2474,29 +2521,14 @@ class AmbientLife {
     private readonly onPet: (animalId: string, byId: string, kind: AnimalKind) => void,
   ) {
     const cx = Math.floor(layout.center.x), cz = Math.floor(layout.center.z);
-    const waterId = blockId('water');
-    // Walkable ground is found from the ground UP, so tree tops, roofs and trunks never count as ground
-    // (bots and animals used to spawn on and walk over canopies). Leaves and wood are never ground.
-    const notGround = new Set(['leaves', 'spruce_leaves', 'oak_log', 'spruce_log', 'bamboo'].map((k) => blockId(k)));
-    const maxY = SURFACE_Y + 4;
+    // Walkable ground is found from the ground UP, so tree tops, roofs and trunks never count as ground.
+    this.grid = grid;
+    this.notGround = new Set(['leaves', 'spruce_leaves', 'oak_log', 'spruce_log', 'bamboo'].map((k) => blockId(k)));
+    this.waterId = blockId('water');
     for (let x = cx - 49; x <= cx + 49; x++) for (let z = cz - 49; z <= cz + 49; z++) {
       if (Math.hypot(x - cx, z - cz) > 48) continue;
-      for (let y = 1; y <= maxY; y++) {
-        const id = grid.get(x, y, z), above = grid.get(x, y + 1, z);
-        const ground = getBlock(id);
-        if (!ground?.solid || ground.shape !== 'cube' || notGround.has(id)) continue;
-        if (above === waterId) {                              // pond: swim on the surface
-          let top = y + 1;
-          while (grid.get(x, top + 1, z) === waterId) top++;
-          if (grid.get(x, top + 1, z) === AIR) this.swim.set(`${x},${z}`, top + 0.65);
-          break;
-        }
-        const feet = getBlock(above), head = getBlock(grid.get(x, y + 2, z));
-        if (feet?.solid || head?.solid) continue;             // something stands here (fence, trunk…)
-        this.walk.set(`${x},${z}`, y + 1);
-        this.cells.push([x, z]);
-        break;
-      }
+      this.updateColumn(x, z);
+      if (this.walk.has(`${x},${z}`)) this.cells.push([x, z]);
     }
     if (this.cells.length === 0) return;
     const rnd = () => this.cells[Math.floor(Math.random() * this.cells.length)];
@@ -2542,8 +2574,11 @@ class AmbientLife {
     if (night !== this.night) this.dayChange(night);
     this.night = night;
     if (joinAfterMs > 0) this.assignInvites(now, joinAfterMs);
-    for (const b of this.bots) this.tickBot(b, dt, now);
-    for (const a of this.animals) this.tickAnimal(a, dt, now);
+    for (const b of this.bots) { this.tickBot(b, dt, now); if (!this.hub.seatSpot(b.id)) this.settle(b, dt, false, false); }
+    for (const a of this.animals) {
+      this.tickAnimal(a, dt, now);
+      this.settle(a, dt, (FLYING as readonly string[]).includes(a.kind), (SWIMMING as readonly string[]).includes(a.kind));
+    }
   }
 
   /** Dusk / dawn: a bot says good night / good morning, roosters crow at sunrise. */
@@ -3109,6 +3144,7 @@ export default class BlocksyRoom extends Room {
     const result = evaluatePlacement(this.grid, x, y, z, id, blockers);
     if (result !== 'ok') return this.reject(client, x, y, z, result);
     this.grid.set(x, y, z, id);
+    this.life.onBlockChanged(x, z);
     p.action = (p.action + 1) % 65535;
     p.placed += 1;
     const part = this.participants.get(p.userId);
@@ -3125,6 +3161,7 @@ export default class BlocksyRoom extends Room {
     const result = evaluateRemoval(this.grid, x, y, z);
     if (result !== 'ok') return this.reject(client, x, y, z, result);
     this.grid.set(x, y, z, AIR);
+    this.life.onBlockChanged(x, z);
     p.action = (p.action + 1) % 65535;
     this.broadcast('blockSet', { x, y, z, id: AIR });
   }

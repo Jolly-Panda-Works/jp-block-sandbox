@@ -4,7 +4,25 @@
 
 Browser game built with React Three Fiber. It connects to the **Blocksy game server**, which lives in its own repository (`blocksy-server`), through the platform API.
 
-## Test mode (no backend needed): playground tokens
+## Test mode (no backend needed): one-click test login
+
+When the site has no backend (for example on GitHub Pages), the join screen shows a **🎮 Play blocksy** button. Team members with a dashboard account use it like this:
+
+1. **Once:** drag the button to the browser's bookmarks bar (Ctrl+Shift+B / ⌘⇧B shows the bar).
+2. **Sign in:** open `https://gameserver.rastar.ir/dashboard` and sign in.
+3. **Play:** click the bookmark **in the dashboard tab**. It asks the dashboard for a playground token for this game and opens the game in a new tab, already joined.
+
+Notes:
+
+- **Why the dashboard tab:** the request runs there, on the same site, so the dashboard's CSRF check passes and the dashboard session is used. No secret is involved.
+- **Several players:** every player clicks the bookmark in their own browser.
+- **Results:** these are playground matches, so match results are not recorded.
+
+The manual way (copying the Console snippet and pasting the token) is still available under "Or paste a token by hand".
+
+**Security:** `?api=` and `?wsUrl=` in the address bar are only accepted for trusted hosts: the configured ones, `*.rastar.ir`, and localhost. Otherwise a crafted link could leak a player's sign-in token.
+
+### Playground tokens by hand
 
 When the site is built without `VITE_API_BASE_URL`, which is the case on GitHub Pages today, the join screen asks for a **playground test token**. This is the same method as the platform's Ping Pong sample:
 
@@ -208,6 +226,24 @@ Small blocky particles, all client-side and cosmetic. They can be switched off i
 |---|---|
 | 🧱 Blocks | Building blocks, incl. white wood, terracotta, mossy cobblestone, quartz |
 | 🌼 Decor | Workbench, chest, beehive, lanterns (incl. blue and paper), fences (wood, dark, stone wall), bookshelf, barrel, crate, pumpkin, jack-o'-lantern, melon, checker tiles, tinted glass, mushroom block, and plants: rose, tulip, orchid, sunflower, daisy, buttercup, mushrooms, fern, sapling, grass tuft, bamboo |
+
+### Camera
+
+| Mode | Behaviour |
+|---|---|
+| 1st person | Through the player's eyes |
+| 3rd person | Behind the player. The distance (2–8 m) is set in **Settings** |
+| Free camera | Flies on its own: WASD, Space up, Shift down, mouse to look. The player stands still; walking and building are off. It stays within 80 m of the player and glides back when you leave the mode |
+
+**V** cycles 1st → 3rd → Free; Settings has buttons for all three.
+
+**Third-person collision:**
+- A thick probe instead of a single ray.
+- **Anticipation:** it also looks about 30° to each side, so when you turn toward a wall it starts moving in early, spread over many frames.
+- Pull-in is limited to 10 m/s, and pull-out waits briefly, then eases.
+- The camera is never inside a block.
+
+Measured while turning near walls, corners and thin posts at up to 270°/s, the largest change per frame dropped from 1.37 m to 0.17 m.
 
 ## Controls
 

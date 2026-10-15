@@ -85,8 +85,8 @@ export function TouchControls() {
             🛒<span>{nearby.title}</span>
           </button>
         )}
-        <button className="touch-btn small" onPointerDown={() => useGame.setState({ cameraMode: cameraMode === 'first' ? 'third' : 'first' })}>
-          🎥<span>{cameraMode === 'first' ? '1st' : '3rd'}</span>
+        <button className="touch-btn small" onPointerDown={() => useGame.setState({ cameraMode: cameraMode === 'first' ? 'third' : cameraMode === 'third' ? 'free' : 'first' })}>
+          🎥<span>{cameraMode === 'first' ? '1st' : cameraMode === 'third' ? '3rd' : 'free'}</span>
         </button>
         <button className={`touch-btn use ${tool}`} onPointerDown={useDown} onPointerUp={useUp} onPointerCancel={useUp}>
           {tool === 'destroy' ? '🔨' : icon ? <img src={icon} alt="" /> : tool === 'block' ? '➕' : '✋'}

@@ -2,13 +2,13 @@ import { voxelRaycast } from '@jp/blocksy-shared';
 
 /**
  * Third-person camera collision without jumps.
- * - A "thick" probe (centre + 4 parallel rays around it) acts like a small sphere, so block edges no longer
- *   make the camera flicker in and out while turning.
- * - Distance and shoulder offset are smoothed: pulled in quickly but continuously, eased out slowly and only
- *   after the way has been clear for a moment (no bouncing when brushing past an obstacle).
- * - Safety: the camera is never left inside a block; only then (or after a teleport) does it snap.
+ * - A "thick" probe (centre + 4 parallel rays) acts like a small sphere, so block edges don't flicker.
+ * - Anticipation: the probe also looks a little to the left and right of the view direction, so when you turn
+ *   toward a wall the camera starts moving in a few degrees EARLIER and the change is spread over more frames
+ *   instead of happening all at once.
+ * - Zooming in is smoothed and speed-limited; zooming out waits a moment and eases.
+ * - Safety: the camera is never left inside a block (smallest step toward the player).
  */
-
 export type Vec3 = [number, number, number];
 export type SolidFn = (x: number, y: number, z: number) => boolean;
 
@@ -32,9 +32,13 @@ export interface CameraRigInput {
 
 export const CAM_RADIUS = 0.22;
 const MIN_DIST = 0.25;
-const PULL_IN_RATE = 20;   // 1/s — fast but continuous
-const EASE_OUT_RATE = 2.5; // 1/s — slow, calm recovery
-const EASE_OUT_DELAY = 0.25;
+export const CAM_TUNING = {
+  pullInRate: 14,     // 1/s
+  maxInSpeed: 10,     // m/s
+  easeOutRate: 2.2,   // 1/s
+  easeOutDelay: 0.3,  // s
+  anticipate: 0.55,   // rad looked ahead on each side (≈ 31°)
+};
 const SIDE_IN_RATE = 14, SIDE_OUT_RATE = 4;
 
 const smoothTo = (cur: number, target: number, rate: number, dt: number) => target + (cur - target) * Math.exp(-rate * dt);
@@ -70,18 +74,30 @@ export function solveCamera(s: CameraRigState, i: CameraRigInput): Vec3 {
   s.shoulder = teleported ? wantShoulder : smoothTo(s.shoulder, wantShoulder, wantShoulder < s.shoulder ? SIDE_IN_RATE : SIDE_OUT_RATE, i.dt);
   const pivot = add(i.head, i.right, s.shoulder);
 
-  // Distance behind the pivot.
+  // Distance behind the pivot: centre direction plus a little to the left and right (anticipation).
   const back: Vec3 = [-i.dir[0], -i.dir[1], -i.dir[2]];
-  const free = thickCast(pivot, back, i.maxDist + CAM_RADIUS, CAM_RADIUS, i.solid);
+  const T = CAM_TUNING;
+  let free = thickCast(pivot, back, i.maxDist + CAM_RADIUS, CAM_RADIUS, i.solid);
+  if (T.anticipate > 0) {
+    for (const a of [T.anticipate, -T.anticipate]) {
+      const c = Math.cos(a), sn = Math.sin(a);
+      const side: Vec3 = [back[0] * c - back[2] * sn, back[1], back[0] * sn + back[2] * c];
+      free = Math.min(free, thickCast(pivot, side, i.maxDist + CAM_RADIUS, CAM_RADIUS, i.solid));
+    }
+  }
   const wanted = Math.max(MIN_DIST, Math.min(i.maxDist, free - CAM_RADIUS));
-  // clearAt = last moment something still limited the camera; easing out starts EASE_OUT_DELAY after that.
   if (wanted <= s.dist + 0.02) s.clearAt = i.t;
   if (teleported) s.dist = wanted;
-  else if (wanted < s.dist) s.dist = smoothTo(s.dist, wanted, PULL_IN_RATE, i.dt);
-  else if (i.t - s.clearAt > EASE_OUT_DELAY) s.dist = smoothTo(s.dist, wanted, EASE_OUT_RATE, i.dt);
+  else if (wanted < s.dist) s.dist = Math.max(smoothTo(s.dist, wanted, T.pullInRate, i.dt), s.dist - T.maxInSpeed * i.dt);
+  else if (i.t - s.clearAt > T.easeOutDelay) s.dist = smoothTo(s.dist, wanted, T.easeOutRate, i.dt);
+  s.dist = Math.min(s.dist, i.maxDist);
 
-  // Never inside a block: if the smoothed position would be in a wall, go to the free distance now.
-  let cam = add(pivot, back, s.dist);
-  if (cellSolid(i.solid, cam)) { s.dist = Math.min(s.dist, wanted); cam = add(pivot, back, s.dist); }
-  return cam;
+  // Never inside a block: come toward the player by the smallest step that frees the camera.
+  const inside = (d: number) => {
+    const p = add(pivot, back, d);
+    return cellSolid(i.solid, p) || cellSolid(i.solid, [p[0], p[1] + 0.12, p[2]]) || cellSolid(i.solid, [p[0], p[1] - 0.12, p[2]]);
+  };
+  while (s.dist > MIN_DIST && inside(s.dist)) s.dist -= 0.05;
+  s.dist = Math.max(MIN_DIST, s.dist);
+  return add(pivot, back, s.dist);
 }

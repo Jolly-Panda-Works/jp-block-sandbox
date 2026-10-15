@@ -39,7 +39,7 @@ function onKey(code: string): void {
   if (code === 'KeyG') return togglePanel('social');
   if (s.panel !== 'none') return;
   if (code === 'KeyH') useGame.setState({ showHints: !s.showHints });
-  else if (code === 'KeyV') useGame.setState({ cameraMode: s.cameraMode === 'first' ? 'third' : 'first' });
+  else if (code === 'KeyV') useGame.setState({ cameraMode: s.cameraMode === 'first' ? 'third' : s.cameraMode === 'third' ? 'free' : 'first' });
   else if (code === 'KeyE') interactMiniGame(); // invite → NPC → shop stall → watch game → pet animal
   else if (code === 'Digit0' || code === 'Numpad0') s.selectTool('destroy');
   else if (/^(Digit|Numpad)[1-9]$/.test(code)) s.selectTool(Number(code.slice(-1)) - 1);

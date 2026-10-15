@@ -26,6 +26,8 @@ const PIVOT_HEIGHT = 1.55, SHOULDER = 0.45, TP_DISTANCE = 4.2, TRANSITION = 0.28
 const REPEAT_DELAY = 0.22, STALL_RADIUS = 3.6, SEND_INTERVAL = 1 / 15;
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const FREE_CAM_SPEED = 9;   // m/s
+const FREE_CAM_RANGE = 80;  // m from the player
 
 /** First empty cell along the view (within reach) where `held` may be placed, stopping at the first solid block. */
 function airPlacementCell(g: NonNullable<typeof world.grid>, origin: THREE.Vector3, dir: THREE.Vector3, eye: THREE.Vector3,
@@ -77,7 +79,7 @@ export function LocalPlayer() {
   const armInner = useRef<THREE.Group>(null);
   const st = useRef({
     blend: 1, rig: newCameraRig(TP_DISTANCE, SHOULDER), lastGround: -9, lastJump: -9, nextRepeat: 0, sendAt: 0, bodyYaw: 0,
-    faceAimUntil: 0, stepDist: 0, nearKey: '', offKey: '', framedFor: '', nearby: null as StallInfo | null, hidden: false, layerKey: '', lastLook: null as unknown, armSwing: -9, bob: 0,
+    faceAimUntil: 0, stepDist: 0, freeOn: false, freePos: new THREE.Vector3(), freeLast: new THREE.Vector3(), freeExitAt: -9, nearKey: '', offKey: '', framedFor: '', nearby: null as StallInfo | null, hidden: false, layerKey: '', lastLook: null as unknown, armSwing: -9, bob: 0,
   });
 
   useEffect(() => { camera.layers.disable(1); }, [camera]);
@@ -90,8 +92,10 @@ export function LocalPlayer() {
     const active = game.panel === 'none' && !game.sessionEnded && !game.reconnecting && (game.pointerLocked || game.touch);
     // In a mini-game (playing, watching or waiting in a lobby) you may only look around.
     const inMg = !!game.mg || (!!game.lobby && game.lobby.hostId !== sessionId);
+    // Free camera: the camera flies on its own, the player stands still (no walking or building).
+    const freeCam = game.cameraMode === 'free' && !inMg;
     const canLook = game.panel === 'none' && !game.sessionEnded && !game.reconnecting && (game.pointerLocked || game.touch || inMg);
-    const canAct = active && !inMg;
+    const canAct = active && !inMg && !freeCam;
     const inp = consumeInput();
 
     // ---- look (mouse delta is per frame: never multiplied by dt) ----
@@ -107,7 +111,7 @@ export function LocalPlayer() {
       if (game.mg.role === 'player' && game.mg.seatYaw !== undefined) b.yaw = game.mg.seatYaw;
       else if (g) b.yaw = Math.atan2(g.x - b.x, g.z - b.z);
       b.pitch = 0.42;
-      if (game.mg.kind !== 'rps' && game.cameraMode === 'first') useGame.setState({ cameraMode: 'third' });
+      if ((game.mg.kind !== 'rps' && game.cameraMode === 'first') || game.cameraMode === 'free') useGame.setState({ cameraMode: 'third' });
     }
     if (!game.mg) s.framedFor = '';
     // Board games: shift the picture right so players + table sit on the right and the board panel on the left.
@@ -119,7 +123,7 @@ export function LocalPlayer() {
       if (boardOpen) pc.setViewOffset(size.width, size.height, -size.width * 0.24, 0, size.width, size.height);
       else pc.clearViewOffset();
     }
-    s.blend = clamp(s.blend + Math.sign((game.cameraMode === 'third' ? 1 : 0) - s.blend) * (dt / TRANSITION), 0, 1);
+    s.blend = clamp(s.blend + Math.sign((game.cameraMode !== 'first' ? 1 : 0) - s.blend) * (dt / TRANSITION), 0, 1);
     const smooth = s.blend * s.blend * (3 - 2 * s.blend);
     b.pitch = clamp(b.pitch, lerp(-1.48, -0.8, smooth), lerp(1.48, 1.3, smooth));
 
@@ -168,10 +172,32 @@ export function LocalPlayer() {
     // Collision-aware, smoothed third-person camera (no jumps when brushing walls or turning; see cameraRig.ts).
     const tp = solveCamera(s.rig, {
       head: [head.x, head.y, head.z], dir: [dir.x, dir.y, dir.z], right: [rx, 0, rz],
-      solid, maxDist: TP_DISTANCE, shoulder: SHOULDER, dt, t,
+      solid, maxDist: game.camDistance || TP_DISTANCE, shoulder: SHOULDER, dt, t,
     });
     const third = new THREE.Vector3(tp[0], tp[1], tp[2]);
     camera.position.lerpVectors(eye, third, smooth);
+    // ---- free camera ----
+    if (freeCam) {
+      if (!s.freeOn) { s.freeOn = true; s.freePos.copy(camera.position); }
+      if (canLook) {
+        const cpf = Math.cos(b.pitch);
+        const speedF = FREE_CAM_SPEED * dt;
+        s.freePos.x += (fx * cpf * inp.moveY + rx * inp.moveX) * speedF;
+        s.freePos.z += (fz * cpf * inp.moveY + rz * inp.moveX) * speedF;
+        s.freePos.y += (-Math.sin(b.pitch) * inp.moveY + (inp.up ? 1 : 0) - (inp.down ? 1 : 0)) * speedF;
+      }
+      // stay inside the world and within reach of the player
+      const away = s.freePos.distanceTo(eye);
+      if (away > FREE_CAM_RANGE) s.freePos.sub(eye).multiplyScalar(FREE_CAM_RANGE / away).add(eye);
+      s.freePos.y = clamp(s.freePos.y, 1, g.sy + 20);
+      camera.position.copy(s.freePos);
+    } else if (s.freeOn) {
+      s.freeOn = false; s.freeExitAt = t; s.freeLast.copy(s.freePos);   // glide back to the player
+    }
+    if (!freeCam && t - s.freeExitAt < 0.5) {
+      const k = (t - s.freeExitAt) / 0.5, e = k * k * (3 - 2 * k);
+      camera.position.lerpVectors(s.freeLast, camera.position, e);
+    }
     camera.rotation.set(-b.pitch, b.yaw + Math.PI, 0, 'YXZ');
 
     // ---- body presentation ----

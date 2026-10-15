@@ -5,7 +5,8 @@ import {
 } from '@jp/blocksy-shared';
 
 export type Panel = 'none' | 'pause' | 'shop' | 'customize' | 'social' | 'build' | 'games';
-export type CameraMode = 'first' | 'third';
+/** first / third person, or a free camera that flies around on its own (the player stays put). */
+export type CameraMode = 'first' | 'third' | 'free';
 
 export interface PlayerMeta { name: string; appearance: Appearance; isLocal: boolean }
 export interface Bubble { text?: string; emoji?: string; until: number }
@@ -61,6 +62,8 @@ interface GameState {
   sensitivity: number;
   /** Visual particles on/off (saved on this device). */
   particles: boolean;
+  /** Third-person camera distance from the player in metres (2–8, saved on this device). */
+  camDistance: number;
   invertY: boolean;
 
   setPanel: (p: Panel) => void;
@@ -123,6 +126,7 @@ export const useGame = create<GameState>()((set, get) => ({
   toast: null,
   nearbyStall: null,
   sensitivity: 1,
+  camDistance: (() => { try { const v = Number(localStorage.getItem('blocksy.camDistance')); return v >= 2 && v <= 8 ? v : 4; } catch { return 4; } })(),
   particles: (() => { try { return localStorage.getItem('blocksy.particles') !== 'off'; } catch { return true; } })(),
   invertY: false,
 

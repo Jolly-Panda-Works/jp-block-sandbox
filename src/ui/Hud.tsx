@@ -118,7 +118,10 @@ export function Hud() {
           <span><Keycap k="H" /> Hide</span>
         </div>
       )}
-      {!s.touch && <div className="card mode"><Keycap k="V" /> {s.cameraMode === 'first' ? 'First person' : 'Third person'}</div>}
+      {!s.touch && <div className="card mode"><Keycap k="V" /> {s.cameraMode === 'first' ? 'First person' : s.cameraMode === 'third' ? 'Third person' : 'Free camera'}</div>}
+      {playing && s.cameraMode === 'free' && !s.mg && (
+        <div className="card free-cam-hint">🎥 Free camera — {s.touch ? 'joystick to fly, drag to look' : 'WASD fly · Space up · Shift down · V to go back'}</div>
+      )}
       {s.tool === 'none' && playing && !s.touch && (
         <div className="card hands">✋ Hands empty — <Keycap k="1–9" /> build · <Keycap k="0" /> destroy · <Keycap k="T" /> choose blocks</div>
       )}

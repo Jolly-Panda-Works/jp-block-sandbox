@@ -67,3 +67,23 @@ test('report: new vs old jump size at the pillar edge', () => {
   const d = run(r, post, 180, (f) => 0.32 + Math.sin(f * 0.25) * 0.06, 0.5);
   console.log(`NEW max jump per frame: ${maxStep(d).toFixed(2)} m`);
 });
+
+test('turning near walls, corners and thin posts: no camera jumps at any turning speed, never inside a block', () => {
+  type Solid = (x: number, y: number, z: number) => boolean;
+  const scenes: Solid[] = [
+    (x, y) => x === -2 && y >= 0 && y <= 5,
+    (x, y, z) => x === 0 && z === -3 && y >= 0 && y <= 5,
+    (x, y, z) => (x === -2 || z === -2) && y >= 0 && y <= 5,
+  ];
+  for (const speed of [Math.PI / 3, (2 * Math.PI) / 3, 1.5 * Math.PI]) for (const solid of scenes) {
+    const r = newCameraRig(4, 0.5);
+    let prev = -1;
+    for (let f = 0; f < 480; f++) {
+      const yaw = f * dt * speed + Math.sin(f * 0.3) * 0.03;
+      const cam = solveCamera(r, { head: [0.5, 1.5, 0.5], dir: [Math.sin(yaw) * 0.94, -0.34, Math.cos(yaw) * 0.94], right: [-Math.cos(yaw), 0, Math.sin(yaw)], solid, maxDist: 4, shoulder: 0.5, dt, t: f * dt });
+      if (prev >= 0) assert.ok(Math.abs(r.dist - prev) <= 0.2, `jump of ${Math.abs(r.dist - prev).toFixed(2)} m in one frame`);
+      prev = r.dist;
+      assert.ok(!solid(Math.floor(cam[0]), Math.floor(cam[1]), Math.floor(cam[2])), 'camera inside a block');
+    }
+  }
+});
