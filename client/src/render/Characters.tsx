@@ -35,6 +35,7 @@ function RemotePlayer({ id, meta }: { id: string; meta: PlayerMeta }) {
   const group = useRef<THREE.Group>(null);
   const anim = getAnim(id);
   const [held, setHeld] = useState(AIR);
+  const [hammer, setHammer] = useState(false);
   useFrame((_, dt) => {
     const r = remotes.get(id), g = group.current;
     if (!r || !g) return;
@@ -47,10 +48,11 @@ function RemotePlayer({ id, meta }: { id: string; meta: PlayerMeta }) {
     g.rotation.set(0, r.ryaw, 0);
     anim.speed = r.speed; anim.grounded = r.grounded;
     if (r.held !== held) setHeld(r.held);
+    if ((r.tool === 'destroy') !== hammer) setHammer(r.tool === 'destroy');
   });
   return (
     <group ref={group}>
-      <Avatar appearance={meta.appearance} anim={anim} heldBlock={held} />
+      <Avatar appearance={meta.appearance} anim={anim} heldBlock={held} hammer={hammer} />
       <Label id={id} name={meta.name} />
     </group>
   );

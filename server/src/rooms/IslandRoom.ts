@@ -1,7 +1,7 @@
 import { Room, type Client } from '../colyseus';
 import {
   AIR, EYE_HEIGHT, ISLAND_NAME, MAX_PLAYERS, REACH, WORLD_SIZE, assignSlot, createWorldGrid, evaluatePlacement,
-  evaluateRemoval, generateIsland, getBlock, isEmojiId, isEmoteId, playerAabb, purchase, rleEncode, sanitizeAppearance,
+  evaluateRemoval, generateIsland, getBlock, isEmojiId, isToolKind, isEmoteId, playerAabb, purchase, rleEncode, sanitizeAppearance,
   sanitizeMessage, sanitizeName, sanitizeProfile, withinReach,
   type Aabb, type BlockGrid, type ClientMessages, type IslandLayout, type JoinOptions, type ProfileData,
 } from '@jp/block-sandbox-shared';
@@ -190,7 +190,8 @@ export class IslandRoom extends Room<IslandState> {
     });
     s.profile.hotbar = next;
     const selected = isInt(m.selected) && m.selected >= 0 && m.selected < next.length ? m.selected : 0;
-    p.held = getBlock(next[selected]) ? next[selected] : AIR;
+    p.tool = isToolKind(m.tool) ? m.tool : 'none';
+    p.held = p.tool === 'block' && getBlock(next[selected]) ? next[selected] : AIR;
     IslandRoom.profiles.save(s.profileId, s.profile);
   }
 

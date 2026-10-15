@@ -64,4 +64,9 @@ export function autoAssign(hotbar: number[], id: number): number {
   return empty;
 }
 
+/** What the player has in hand: nothing, a block from the hotbar, or the destroy tool (key 0). */
+export const TOOLS = ['none', 'block', 'destroy'] as const;
+export type ToolKind = typeof TOOLS[number];
+export const isToolKind = (v: unknown): v is ToolKind => (TOOLS as readonly unknown[]).includes(v);
+
 export const listings = (category: ShopCategory): BlockDef[] => BLOCKS.filter((b) => b.purchasable && b.category === category);

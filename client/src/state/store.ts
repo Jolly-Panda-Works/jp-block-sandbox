@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import {
   AIR, HOTBAR_SLOTS, assignSlot, createProfile, DEFAULT_APPEARANCE,
-  type Appearance, type IslandLayout, type ProfileData, type ShopCategory, type StallInfo,
+  type Appearance, type ToolKind, type IslandLayout, type ProfileData, type ShopCategory, type StallInfo,
 } from '@jp/block-sandbox-shared';
 
-export type Panel = 'none' | 'pause' | 'shop' | 'customize' | 'social';
+export type Panel = 'none' | 'pause' | 'shop' | 'customize' | 'social' | 'build';
 export type CameraMode = 'first' | 'third';
 
 export interface PlayerMeta { name: string; appearance: Appearance; isLocal: boolean }
@@ -18,6 +18,8 @@ interface GameState {
   layout: IslandLayout | null;
   profile: ProfileData;
   selectedSlot: number;
+  /** Hands are empty by default; building/destroying is opted into with 1–9 / 0. */
+  tool: ToolKind;
   panel: Panel;
   shopTab: ShopCategory;
   pointerLocked: boolean;
@@ -33,7 +35,11 @@ interface GameState {
   setPanel: (p: Panel) => void;
   showToast: (text: string) => void;
   selectSlot: (i: number) => void;
+  /** Number-key behaviour: 1–9 picks a hotbar block, 'destroy' is key 0; pressing the active one again empties your hands. */
+  selectTool: (slot: number | 'destroy') => void;
+  setTool: (tool: ToolKind) => void;
   cycleSlot: (delta: number) => void;
+  clearSlot: (i: number) => void;
   equip: (id: number) => void;
   showBubble: (sessionId: string, b: Omit<Bubble, 'until'>, seconds?: number) => void;
 }
@@ -48,6 +54,7 @@ export const useGame = create<GameState>()((set, get) => ({
   layout: null,
   profile: createProfile(),
   selectedSlot: 0,
+  tool: 'none',
   panel: 'none',
   shopTab: 'blocks',
   pointerLocked: false,
@@ -63,7 +70,26 @@ export const useGame = create<GameState>()((set, get) => ({
   setPanel: (panel) => set({ panel }),
   showToast: (text) => set({ toast: { text, id: Date.now() + Math.random() } }),
   selectSlot: (i) => { if (i >= 0 && i < HOTBAR_SLOTS) set({ selectedSlot: i }); },
-  cycleSlot: (delta) => set({ selectedSlot: (((get().selectedSlot + delta) % HOTBAR_SLOTS) + HOTBAR_SLOTS) % HOTBAR_SLOTS }),
+  selectTool: (slot) => {
+    const { tool, selectedSlot } = get();
+    if (slot === 'destroy') set({ tool: tool === 'destroy' ? 'none' : 'destroy' });
+    else if (slot >= 0 && slot < HOTBAR_SLOTS) set(tool === 'block' && selectedSlot === slot ? { tool: 'none' } : { tool: 'block', selectedSlot: slot });
+  },
+  setTool: (tool) => set({ tool }),
+  // Mouse wheel while building: slots 1–9 then the destroy tool (position 9), wrapping around.
+  cycleSlot: (delta) => {
+    const { tool, selectedSlot } = get();
+    const n = HOTBAR_SLOTS + 1;
+    const pos = ((((tool === 'destroy' ? HOTBAR_SLOTS : selectedSlot) + delta) % n) + n) % n;
+    set(pos === HOTBAR_SLOTS ? { tool: 'destroy' } : { tool: 'block', selectedSlot: pos });
+  },
+  clearSlot: (i) => {
+    const { profile } = get();
+    const hotbar = profile.hotbar.slice();
+    if (i < 0 || i >= hotbar.length) return;
+    hotbar[i] = AIR;
+    set({ profile: { ...profile, hotbar } });
+  },
   equip: (id) => {
     const { profile, selectedSlot } = get();
     const hotbar = profile.hotbar.slice();
@@ -75,7 +101,8 @@ export const useGame = create<GameState>()((set, get) => ({
 }));
 
 /** Block in the selected hotbar slot (air when empty). */
-export const selectedBlock = (s: Pick<GameState, 'profile' | 'selectedSlot'>): number => s.profile.hotbar[s.selectedSlot] ?? AIR;
+export const selectedBlock = (s: Pick<GameState, 'profile' | 'selectedSlot' | 'tool'>): number =>
+  s.tool === 'block' ? s.profile.hotbar[s.selectedSlot] ?? AIR : AIR;
 
 /** Local appearance (from the profile). */
 export const localAppearance = (s: Pick<GameState, 'profile'>): Appearance => s.profile.appearance ?? DEFAULT_APPEARANCE;

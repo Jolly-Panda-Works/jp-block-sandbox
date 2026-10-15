@@ -1,4 +1,5 @@
 import { useMemo, useRef, type ReactNode } from 'react';
+import { Hammer } from './Hammer';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { AIR, HAND_ANCHOR, JOINTS, MODEL_SCALE, buildAvatarParts, type Appearance, type AvatarPart, type Joint } from '@jp/block-sandbox-shared';
@@ -38,13 +39,13 @@ function Part({ p }: { p: AvatarPart }) {
   return <mesh geometry={BOX} material={material(p.color)} position={p.pos} scale={p.size} rotation={p.rot ?? [0, 0, 0]} castShadow receiveShadow />;
 }
 
-interface Props { appearance: Appearance; anim: AnimState; heldBlock?: number }
+interface Props { appearance: Appearance; anim: AnimState; heldBlock?: number; hammer?: boolean }
 
 /**
  * Blocky character built from {@link buildAvatarParts} with procedural animation:
  * walk cycle, idle sway, airborne pose, use-swing and the Happy / Cry / Wave emotes.
  */
-export function Avatar({ appearance, anim, heldBlock = AIR }: Props) {
+export function Avatar({ appearance, anim, heldBlock = AIR, hammer = false }: Props) {
   const parts = useMemo(() => buildAvatarParts(appearance), [appearance]);
   const by = (j: Joint): ReactNode => parts.filter((p) => p.joint === j).map((p, i) => <Part key={`${j}${i}`} p={p} />);
   const offset = useRef<THREE.Group>(null);
@@ -102,7 +103,10 @@ export function Avatar({ appearance, anim, heldBlock = AIR }: Props) {
           <group ref={armL} position={JOINTS.armL}>{by('armL')}</group>
           <group ref={armR} position={JOINTS.armR}>
             {by('armR')}
-            {heldGeo && (
+            {hammer && (
+              <group position={HAND_ANCHOR} rotation={[Math.PI / 2, 0, 0]} scale={1 / MODEL_SCALE}><Hammer /></group>
+            )}
+            {!hammer && heldGeo && (
               <mesh geometry={heldGeo} material={getBlockMaterials()} position={HAND_ANCHOR} scale={0.3 / MODEL_SCALE} rotation={[0, Math.PI / 4, 0]} castShadow />
             )}
           </group>

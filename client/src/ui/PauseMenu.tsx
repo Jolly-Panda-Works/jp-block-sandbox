@@ -3,9 +3,10 @@ import { openPanel } from '../game/pointer';
 import { Keycap } from './Hud';
 
 const CONTROLS: [string, string][] = [
-  ['W A S D', 'Move'], ['Shift', 'Sprint'], ['Space', 'Jump'], ['Mouse', 'Look'], ['Left click', 'Remove block'],
-  ['Right click', 'Place block'], ['1–9 / Wheel', 'Select hotbar slot'], ['V', 'First / third person'], ['E', 'Interact (shop stall)'],
-  ['B', 'Shop'], ['C', 'Style'], ['T', 'Social'], ['H', 'Hide hints'], ['Esc', 'Menu / close'],
+  ['W A S D', 'Move'], ['Shift', 'Sprint'], ['Space', 'Jump'], ['Mouse', 'Look'],
+  ['1–9', 'Hold a block (again = put away)'], ['0', 'Destroy tool'], ['Left click', 'Use: place / destroy'], ['Wheel', 'Next tool while building'],
+  ['Q', 'Hands empty'], ['T', 'Build menu (choose blocks)'], ['V', 'First / third person'], ['E', 'Interact (shop stall)'],
+  ['B', 'Shop'], ['C', 'Style'], ['G', 'Social'], ['H', 'Hide hints'], ['Esc', 'Menu / close'],
 ];
 
 export function PauseMenu() {
@@ -18,6 +19,7 @@ export function PauseMenu() {
         <div className="pause-row">
           <button onClick={() => openPanel('shop')}>🧱 Shop</button>
           <button onClick={() => openPanel('customize')}>👕 Style</button>
+          <button onClick={() => openPanel('build')}>🔨 Build</button>
           <button onClick={() => openPanel('social')}>😊 Social</button>
         </div>
         <div className="setting">

@@ -14,6 +14,8 @@ export class PlayerState extends Schema {
   @type('boolean') grounded = true;
   @type('string') appearance = '{}';
   @type('uint16') held = 0;
+  /** 'none' (hands empty), 'block' (building with `held`) or 'destroy' (hammer). */
+  @type('string') tool = 'none';
   /** Incremented on every place/remove so other clients can play the arm swing. */
   @type('uint16') action = 0;
 }

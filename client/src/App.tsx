@@ -6,6 +6,7 @@ import { JoinScreen } from './ui/JoinScreen';
 import { ShopPanel } from './ui/ShopPanel';
 import { CustomizePanel } from './ui/CustomizePanel';
 import { SocialPanel } from './ui/SocialPanel';
+import { BuildPanel } from './ui/BuildPanel';
 import { PauseMenu } from './ui/PauseMenu';
 import { clearHeld, installInput } from './game/input';
 import { lockPointer, openPanel, takeSuppressPause, togglePanel } from './game/pointer';
@@ -20,12 +21,15 @@ function onKey(code: string): void {
   }
   if (code === 'KeyB') return togglePanel('shop');
   if (code === 'KeyC') return togglePanel('customize');
-  if (code === 'KeyT') return togglePanel('social');
+  if (code === 'KeyT') return togglePanel('build');
+  if (code === 'KeyG') return togglePanel('social');
   if (s.panel !== 'none') return;
   if (code === 'KeyH') useGame.setState({ showHints: !s.showHints });
   else if (code === 'KeyV') useGame.setState({ cameraMode: s.cameraMode === 'first' ? 'third' : 'first' });
   else if (code === 'KeyE' && s.nearbyStall) { useGame.setState({ shopTab: s.nearbyStall.category }); openPanel('shop'); }
-  else if (code.startsWith('Digit')) { const n = Number(code.slice(5)); if (n >= 1 && n <= 9) s.selectSlot(n - 1); }
+  else if (code === 'Digit0' || code === 'Numpad0') s.selectTool('destroy');
+  else if (/^(Digit|Numpad)[1-9]$/.test(code)) s.selectTool(Number(code.slice(-1)) - 1);
+  else if (code === 'KeyQ' && s.tool !== 'none') s.setTool('none'); // put away
 }
 
 export function App() {
@@ -60,6 +64,7 @@ export function App() {
       {panel === 'shop' && <ShopPanel />}
       {panel === 'customize' && <CustomizePanel />}
       {panel === 'social' && <SocialPanel />}
+      {panel === 'build' && <BuildPanel />}
       {panel === 'pause' && <PauseMenu />}
     </div>
   );

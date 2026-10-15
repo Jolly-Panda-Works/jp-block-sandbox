@@ -8,15 +8,15 @@ All textures, characters and icons are original and generated in code. No Minecr
 - **World**: a voxel island ("Sunny Isle"). It has layered cliffs, a stone plaza with a lantern pillar and a large oak, dirt paths with stepping stones, two shop stalls (Blocks / Decor) with striped awnings and shopkeepers, fenced "Build Here" plots, trees, lantern posts, a dock, floating islets, sea, square sun, clouds and seagulls.
 - **Player**: walk, sprint, jump (coyote time and jump buffering, no double jumps), gravity, and voxel collision with walls and ceilings. Falling into the sea respawns you.
 - **Camera**: first and third person (**V**). The transition is blended, so it never snaps. The third-person camera has shoulder offset and collision. In first person your body is hidden but still casts a shadow, and a first-person arm holds the selected block.
-- **Building**: the crosshair targets blocks with a voxel ray cast. A teal outline marks the target and a ghost preview shows where the block will go. **Right click** places, **left click** removes, and holding a button repeats. The game:
+- **Building (opt-in build mode)**: hands are empty by default, so clicking never edits the world by accident. Press **T** to open the build menu and choose up to 9 blocks from your bag (owned blocks) for keys **1–9**. Key **0** is always the **destroy** tool (hammer). Pressing a number holds that block or tool; pressing it again (or **Q**) puts it away. **Left click** uses what's in hand: place the block or destroy the target. Holding the button repeats. The crosshair targets blocks with a voxel ray cast; a teal outline (orange for destroy) marks the target and a ghost preview shows where the block will go. The game:
   - checks reach;
   - stops you placing inside any player;
   - replaces flowers and grass when you build on them;
   - protects the island base and the stalls.
 - **Shop**: blocks are bought at the stalls (**E**) or with **B**. A block is bought once and owned forever, with no item counts. Every price is currently 0. Prices and a coin balance already exist for a later economy.
-- **Hotbar**: 9 slots. Use 1–9 or the mouse wheel. Click an owned block in the shop to put it in the selected slot.
+- **Hotbar**: 9 block slots plus slot 0 (destroy). Use 1–9 / 0, or the mouse wheel while building.
 - **Character customisation** (**C**): skin colour, plus a model and a colour for hair, shirt, pants and shoes. Accessories are hat, glasses and watch. A live 3D preview is included.
-- **Social** (**T**):
+- **Social** (**G**):
   - **text** messages and **emoji**, both shown in a bubble above your head;
   - **emotes**: character animations Happy, Cry and Wave.
 - **Multiplayer**: up to 8 players per room. The Colyseus server is authoritative for blocks, ownership and chat. Every edit is validated for bounds, protection, ownership, reach, player overlap and rate.
@@ -53,11 +53,14 @@ npm start          # Colyseus server also serves client/dist on http://localhost
 | Move / Sprint | W A S D / Shift (by physical key, so it works with Persian and other layouts) |
 | Jump | Space |
 | Look | Mouse (click the game to capture the cursor) |
-| Remove / Place block | Left / Right mouse button (hold to repeat) |
-| Select hotbar slot | 1–9, mouse wheel |
+| Hold a block / put it away | 1–9 (press again, or Q, for empty hands) |
+| Destroy tool | 0 |
+| Use (place / destroy) | Left mouse button (hold to repeat) |
+| Next tool while building | Mouse wheel |
+| Build menu: choose blocks for 1–9 | T |
 | First / third person | V |
 | Open the shop at a stall | E |
-| Shop / Style / Social | B / C / T |
+| Shop / Style / Social | B / C / G |
 | Hide hints | H |
 | Menu, close panels | Esc |
 

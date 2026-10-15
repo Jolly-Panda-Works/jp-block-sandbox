@@ -9,7 +9,7 @@ import { teleportLocal } from '../game/localState';
 import { dropAnim, getAnim, playEmote, playSwing } from '../render/animState';
 
 /** Replicated transform of a remote player; render* fields are the interpolated values. */
-export interface RemoteState { x: number; y: number; z: number; yaw: number; speed: number; grounded: boolean; held: number; action: number; rx: number; ry: number; rz: number; ryaw: number }
+export interface RemoteState { x: number; y: number; z: number; yaw: number; speed: number; grounded: boolean; held: number; tool: string; action: number; rx: number; ry: number; rz: number; ryaw: number }
 export const remotes = new Map<string, RemoteState>();
 
 let room: Room | null = null;
@@ -74,7 +74,7 @@ function wireRoom(r: Room): void {
     world.load(m.size, m.cells, m.protectedCells);
     teleportLocal(m.spawn.x, m.spawn.y, m.spawn.z, m.spawn.yaw);
     set({ layout: m.layout, profile: m.profile, phase: 'playing' });
-    if (m.profile.owned.length === 0) get().showToast('Visit the Blocks stall (or press B) to get blocks — everything is free!');
+    if (m.profile.owned.length === 0) get().showToast('Visit the Blocks stall (or press B) to get blocks, then press T to start building');
   });
   r.onMessage('blockSet', (m: ServerMessages['blockSet']) => { world.grid?.set(m.x, m.y, m.z, m.id); });
   r.onMessage('editRejected', (m: ServerMessages['editRejected']) => {
@@ -102,14 +102,14 @@ function wireRoom(r: Room): void {
     const meta = () => ({ name: String(p.name), appearance: sanitizeAppearance(safeJson(p.appearance)), isLocal });
     set((s) => ({ players: { ...s.players, [id]: meta() } }));
     if (!isLocal) {
-      remotes.set(id, { x: p.x, y: p.y, z: p.z, yaw: p.yaw, speed: 0, grounded: true, held: p.held, action: p.action, rx: p.x, ry: p.y, rz: p.z, ryaw: p.yaw });
+      remotes.set(id, { x: p.x, y: p.y, z: p.z, yaw: p.yaw, speed: 0, grounded: true, held: p.held, tool: p.tool, action: p.action, rx: p.x, ry: p.y, rz: p.z, ryaw: p.yaw });
       p.onChange(() => {
         const s = remotes.get(id);
         if (!s) return;
         if (p.action !== s.action) playSwing(id);
-        Object.assign(s, { x: p.x, y: p.y, z: p.z, yaw: p.yaw, speed: p.speed, grounded: p.grounded, held: p.held, action: p.action });
+        Object.assign(s, { x: p.x, y: p.y, z: p.z, yaw: p.yaw, speed: p.speed, grounded: p.grounded, held: p.held, tool: p.tool, action: p.action });
         const a = getAnim(id);
-        a.holding = !!getBlock(p.held) && p.held !== AIR;
+        a.holding = p.tool === 'destroy' || (!!getBlock(p.held) && p.held !== AIR);
       });
     }
     p.listen('appearance', () => set((s) => ({ players: { ...s.players, [id]: meta() } })));
@@ -138,7 +138,10 @@ function safeJson(s: unknown): unknown {
 // Keep the server's copy of the hotbar/selection in sync (debounced).
 let hotbarTimer: ReturnType<typeof setTimeout> | null = null;
 useGame.subscribe((s, prev) => {
-  if (s.phase !== 'playing' || (s.profile.hotbar === prev.profile.hotbar && s.selectedSlot === prev.selectedSlot)) return;
+  if (s.phase !== 'playing' || (s.profile.hotbar === prev.profile.hotbar && s.selectedSlot === prev.selectedSlot && s.tool === prev.tool)) return;
   if (hotbarTimer) clearTimeout(hotbarTimer);
-  hotbarTimer = setTimeout(() => send('hotbar', { slots: useGame.getState().profile.hotbar, selected: useGame.getState().selectedSlot }), 250);
+  hotbarTimer = setTimeout(() => {
+    const g = useGame.getState();
+    send('hotbar', { slots: g.profile.hotbar, selected: g.selectedSlot, tool: g.tool });
+  }, 120);
 });

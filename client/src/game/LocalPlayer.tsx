@@ -13,6 +13,7 @@ import { useGame, selectedBlock } from '../state/store';
 import { Avatar } from '../render/Avatar';
 import { getAnim, now, playSwing } from '../render/animState';
 import { getBlockGeometry, getBlockMaterials } from '../render/textures';
+import { Hammer } from '../render/Hammer';
 
 // Movement tuning
 const WALK = 4.3, SPRINT = 6.4, ACCEL_GROUND = 40, ACCEL_AIR = 12, GRAVITY = 26, MAX_FALL = 45;
@@ -26,7 +27,7 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /** Thin-box outline of a unit cube (WebGL lines are always 1 px, so edges are boxes). */
-function Outline() {
+function Outline({ color }: { color: string }) {
   const edges = useMemo(() => {
     const t = 0.03, o = 0.5 + t / 2, list: { p: [number, number, number]; s: [number, number, number] }[] = [];
     for (const a of [-1, 1]) for (const b of [-1, 1]) {
@@ -36,7 +37,7 @@ function Outline() {
     }
     return list;
   }, []);
-  return <>{edges.map((e, i) => <mesh key={i} position={e.p} scale={e.s}><boxGeometry /><meshBasicMaterial color="#3fe6c8" /></mesh>)}</>;
+  return <>{edges.map((e, i) => <mesh key={i} position={e.p} scale={e.s}><boxGeometry /><meshBasicMaterial color={color} /></mesh>)}</>;
 }
 
 /**
@@ -48,6 +49,7 @@ export function LocalPlayer() {
   const sessionId = useGame((s) => s.sessionId) ?? 'local';
   const appearance = useGame((s) => s.profile.appearance);
   const held = useGame(selectedBlock);
+  const tool = useGame((s) => s.tool);
   const anim = getAnim(sessionId);
   const avatar = useRef<THREE.Group>(null);
   const outline = useRef<THREE.Group>(null);
@@ -73,7 +75,7 @@ export function LocalPlayer() {
     if (active) {
       b.yaw -= inp.lookX * LOOK_SPEED * game.sensitivity;
       b.pitch += inp.lookY * LOOK_SPEED * game.sensitivity * (game.invertY ? -1 : 1);
-      if (inp.wheel) game.cycleSlot(inp.wheel);
+      if (inp.wheel && game.tool !== 'none') game.cycleSlot(inp.wheel);
     }
     s.blend = clamp(s.blend + Math.sign((game.cameraMode === 'third' ? 1 : 0) - s.blend) * (dt / TRANSITION), 0, 1);
     const smooth = s.blend * s.blend * (3 - 2 * s.blend);
@@ -131,12 +133,12 @@ export function LocalPlayer() {
     s.bodyYaw += fp ? diff : clamp(diff, -12 * dt, 12 * dt);
     anim.speed = hs / WALK;
     anim.grounded = b.grounded;
-    anim.holding = held !== AIR;
+    anim.holding = game.tool !== 'none';
     if (avatar.current) {
       avatar.current.position.set(b.x, b.y, b.z);
       avatar.current.rotation.set(0, s.bodyYaw, 0);
       const hide = camera.position.distanceTo(eye) < HIDE_BODY_BELOW;
-      const key = `${hide}|${held}`;
+      const key = `${hide}|${held}|${game.tool}`;
       if (key !== s.layerKey || s.lastLook !== appearance) {
         s.layerKey = key;
         s.lastLook = appearance;
@@ -150,23 +152,24 @@ export function LocalPlayer() {
     const hit = voxelRaycast(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, REACH + origin.distanceTo(eye) + 1,
       (x, y, z) => !!getBlock(g.get(x, y, z))?.targetable);
     const minAlong = eye.clone().sub(origin).dot(dir) - 0.5; // ignore blocks between a third-person camera and the player
-    const valid = active && hit.hit && hit.distance >= minAlong && withinReach(eye.x, eye.y, eye.z, hit.x, hit.y, hit.z, REACH);
+    const building = game.tool !== 'none';
+    const valid = active && building && hit.hit && hit.distance >= minAlong && withinReach(eye.x, eye.y, eye.z, hit.x, hit.y, hit.z, REACH);
     const blockers = [playerAabb(b.x, b.y, b.z), ...[...remotes.values()].map((r) => playerAabb(r.x, r.y, r.z))];
     let place: [number, number, number] | null = null;
-    if (valid) {
+    if (valid && game.tool === 'block') {
       place = resolvePlacementCell(g, hit.x, hit.y, hit.z, hit.nx, hit.ny, hit.nz);
       if (held === AIR || evaluatePlacement(g, place[0], place[1], place[2], held, blockers) !== 'ok') place = null;
     }
     if (outline.current) { outline.current.visible = valid; if (valid) outline.current.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5); }
     if (ghost.current) { ghost.current.visible = !!place; if (place) ghost.current.position.set(place[0] + 0.5, place[1] + 0.5, place[2] + 0.5); }
 
-    if (active) {
-      if (!inp.primaryHeld && !inp.secondaryHeld) s.nextRepeat = 0;
-      const remove = inp.primaryPressed || (inp.primaryHeld && t >= s.nextRepeat);
-      const placing = !remove && (inp.secondaryPressed || (inp.secondaryHeld && t >= s.nextRepeat));
-      if (remove || placing) s.nextRepeat = t + REPEAT_DELAY;
-      const explicit = inp.primaryPressed || inp.secondaryPressed;
-      if (remove) {
+    // One button, one action: left click uses whatever is in hand (block → place, hammer → destroy).
+    if (active && building) {
+      if (!inp.primaryHeld) s.nextRepeat = 0;
+      const use = inp.primaryPressed || (inp.primaryHeld && t >= s.nextRepeat);
+      const explicit = inp.primaryPressed;
+      if (use) s.nextRepeat = t + REPEAT_DELAY;
+      if (use && game.tool === 'destroy') {
         if (!valid) { if (explicit) game.showToast('Nothing in reach'); }
         else {
           const r = evaluateRemoval(g, hit.x, hit.y, hit.z);
@@ -177,15 +180,15 @@ export function LocalPlayer() {
           } else if (explicit && r === 'protected') game.showToast('This part of the island is protected');
           else if (explicit && r === 'not_removable') game.showToast("This block can't be removed");
         }
-      } else if (placing) {
-        if (held === AIR) { if (explicit) game.showToast('Empty slot — get blocks at the shop (B)'); }
+      } else if (use && game.tool === 'block') {
+        if (held === AIR) { if (explicit) game.showToast(`Slot ${game.selectedSlot + 1} is empty — press T to choose blocks`); }
         else if (!game.profile.owned.includes(held)) { if (explicit) game.showToast("You don't own this block yet"); }
         else if (!valid) { if (explicit) game.showToast('Aim at a block to build on it'); }
         else if (place) {
           g.set(place[0], place[1], place[2], held);
           send('place', { x: place[0], y: place[1], z: place[2], id: held });
           s.faceAimUntil = t + 0.8; s.armSwing = t; playSwing(sessionId);
-        } else if (explicit) game.showToast('Someone is standing there');
+        } else if (explicit) game.showToast("Can't build there");
       }
     }
 
@@ -193,7 +196,7 @@ export function LocalPlayer() {
     if (arm.current && armInner.current) {
       arm.current.position.copy(camera.position);
       arm.current.quaternion.copy(camera.quaternion);
-      arm.current.visible = s.blend < 0.02;
+      arm.current.visible = s.blend < 0.02 && game.tool !== 'none'; // hands empty: no arm in view
       s.bob += dt * 9 * (b.grounded ? Math.min(1, hs / WALK) : 0);
       const sw = (t - s.armSwing) / 0.25, swing = sw >= 0 && sw < 1 ? Math.sin(sw * Math.PI) : 0;
       const amp = Math.min(1, hs / WALK) * 0.018;
@@ -224,8 +227,8 @@ export function LocalPlayer() {
 
   return (
     <>
-      <group ref={avatar}><Avatar appearance={appearance} anim={anim} heldBlock={held} /></group>
-      <group ref={outline} visible={false}><Outline /></group>
+      <group ref={avatar}><Avatar appearance={appearance} anim={anim} heldBlock={held} hammer={tool === 'destroy'} /></group>
+      <group ref={outline} visible={false}><Outline color={tool === 'destroy' ? '#ff7a59' : '#3fe6c8'} /></group>
       <mesh ref={ghost} visible={false} scale={0.98}>
         <boxGeometry />
         <meshBasicMaterial color="#5ff2d9" transparent opacity={0.28} depthWrite={false} />
@@ -235,7 +238,8 @@ export function LocalPlayer() {
         <group ref={armInner}>
           {sleeve > 0 && <mesh renderOrder={1000} position={[0, sleeve / 2, 0]} scale={[0.252, sleeve, 0.252]}><boxGeometry />{overlay(appearance.shirtColor)}</mesh>}
           <mesh renderOrder={1000} position={[0, sleeve + (0.7 - sleeve) / 2, 0]} scale={[0.24, 0.7 - sleeve, 0.24]}><boxGeometry />{overlay(appearance.skin)}</mesh>
-          {heldGeo && (
+          {tool === 'destroy' && <group position={[0, 0.62, -0.12]} rotation={[0.5, 0, 0.25]}><Hammer overlay /></group>}
+          {tool === 'block' && heldGeo && (
             <mesh renderOrder={1001} geometry={heldGeo} position={[0, 0.72, -0.16]} rotation={[0.96, -0.52, 0]} scale={0.3}
               material={getBlockMaterials()} />
           )}

@@ -1,5 +1,5 @@
 import type { Appearance } from './avatar';
-import type { ProfileData, PurchaseResult } from './economy';
+import type { ProfileData, PurchaseResult, ToolKind } from './economy';
 import type { IslandLayout } from './island';
 import type { EmojiId, EmoteId } from './social';
 import type { PlacementResult, RemovalResult } from './placement';
@@ -13,7 +13,7 @@ export interface ClientMessages {
   place: { x: number; y: number; z: number; id: number };
   remove: { x: number; y: number; z: number };
   buy: { id: number };
-  hotbar: { slots: number[]; selected: number };
+  hotbar: { slots: number[]; selected: number; tool: ToolKind };
   appearance: Appearance;
   chat: { text: string };
   emoji: { id: EmojiId };

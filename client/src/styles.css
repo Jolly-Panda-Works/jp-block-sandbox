@@ -121,3 +121,30 @@ input:focus { border-color: var(--accent); }
 .join-card h1 { margin: 0; }
 .join-card p { margin: 0; color: var(--sub); }
 .error { color: #ffb4a8; font-weight: 700; }
+
+/* Build mode */
+.hands { position: absolute; left: 50%; bottom: 122px; transform: translateX(-50%); padding: 8px 14px; font-weight: 700; font-size: 14px; white-space: nowrap; }
+.hotbar.idle { opacity: 0.72; }
+.slot .tool-icon { width: 54px; height: 54px; display: grid; place-items: center; font-size: 30px; border-radius: 10px; background: var(--tile); border: 3px solid transparent; }
+.slot.destroy.selected .tool-icon { border-color: #ff7a59; background: var(--tile-hover); transform: scale(1.06); }
+.slot.destroy::before { display: none; }
+.build { width: min(900px, 96vw); }
+.build h3 { margin: 16px 0 8px; font-size: 18px; }
+.build .count { font-size: 13px; color: var(--sub); margin-left: 6px; }
+.hint.inline { margin: 0; }
+.build-slots { display: grid; grid-template-columns: repeat(10, 1fr); gap: 8px; }
+.bslot { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px 8px; background: var(--tile); border: 3px solid transparent; border-radius: 12px; font-size: 12px; }
+.bslot.selected { border-color: var(--accent); }
+.bslot img { width: 48px; height: 48px; image-rendering: pixelated; }
+.bslot .empty { width: 48px; height: 48px; display: grid; place-items: center; font-size: 26px; color: var(--sub); border: 2px dashed rgba(255,255,255,0.25); border-radius: 8px; }
+.bslot .num { position: absolute; top: 4px; left: 7px; color: var(--sub); font-size: 11px; }
+.bslot .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.bslot.destroy { border-color: rgba(255, 122, 89, 0.6); cursor: default; }
+.bslot .tool-icon { width: 48px; height: 48px; display: grid; place-items: center; font-size: 30px; }
+.bag { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; max-height: 38vh; overflow: auto; }
+.bag-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px; font-size: 13px; }
+.bag-item img { width: 52px; height: 52px; image-rendering: pixelated; }
+.bag-item.equipped { outline: 2px solid var(--accent-dark); }
+.badge-slot { position: absolute; top: 4px; right: 6px; background: var(--accent); color: #08352c; border-radius: 6px; padding: 0 6px; font-size: 12px; }
+.empty-bag { display: flex; align-items: center; gap: 12px; color: var(--sub); background: var(--tile); padding: 14px; border-radius: 12px; }
+.active-tool { outline: 2px solid var(--accent); }

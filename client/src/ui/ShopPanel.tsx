@@ -20,7 +20,7 @@ export function ShopPanel() {
           <div className="coins">🪙 {profile.coins}</div>
           <button className="close" onClick={() => openPanel('none')}>✕</button>
         </header>
-        <p className="hint">Get a block once and it's yours forever. Click an owned block to put it in hotbar slot {selectedSlot + 1}.</p>
+        <p className="hint">Get a block once and it goes into your bag forever. Press T to choose which blocks are on keys 1–9; click an owned block here to put it in slot {selectedSlot + 1}.</p>
         <div className="grid">
           {items.map((b) => {
             const owned = profile.owned.includes(b.id);

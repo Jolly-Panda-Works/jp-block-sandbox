@@ -19,7 +19,8 @@ export function Hud() {
         <div><div className="title">{ISLAND_NAME}</div><div className="sub">👥 {count} / {MAX_PLAYERS} players</div></div>
       </div>
       <div className="top-buttons">
-        <button onClick={() => togglePanel('social')}>😊 Social <Keycap k="T" /></button>
+        <button onClick={() => togglePanel('build')}>🔨 Build <Keycap k="T" /></button>
+        <button onClick={() => togglePanel('social')}>😊 Social <Keycap k="G" /></button>
         <button onClick={() => togglePanel('customize')}>👕 Style <Keycap k="C" /></button>
         <button onClick={() => togglePanel('shop')}>🧱 Shop <Keycap k="B" /></button>
         <button onClick={() => togglePanel('pause')}>⚙️</button>
@@ -33,27 +34,37 @@ export function Hud() {
         <div className="card hints">
           <span><Keycap k="W" /><Keycap k="A" /><Keycap k="S" /><Keycap k="D" /> Move</span>
           <span><Keycap k="Space" /> Jump</span>
-          <span><Keycap k="LMB" /> Remove</span>
-          <span><Keycap k="RMB" /> Place</span>
+          <span><Keycap k="1–9" /> Build</span>
+          <span><Keycap k="0" /> Destroy</span>
+          <span><Keycap k="LMB" /> Use</span>
+          <span><Keycap k="T" /> Choose blocks</span>
           <span><Keycap k="V" /> Camera</span>
           <span><Keycap k="E" /> Interact</span>
           <span><Keycap k="H" /> Hide</span>
         </div>
       )}
       <div className="card mode"><Keycap k="V" /> {s.cameraMode === 'first' ? 'First person' : 'Third person'}</div>
-      <div className="card hotbar">
+      {s.tool === 'none' && playing && (
+        <div className="card hands">✋ Hands empty — <Keycap k="1–9" /> build · <Keycap k="0" /> destroy · <Keycap k="T" /> choose blocks</div>
+      )}
+      <div className={`card hotbar ${s.tool === 'none' ? 'idle' : ''}`}>
         {Array.from({ length: HOTBAR_SLOTS }, (_, i) => {
           const id = s.profile.hotbar[i] ?? AIR;
           const def = getBlock(id);
           const icon = def ? getIconUrl(id) : null;
           return (
-            <button key={i} className={`slot ${i === s.selectedSlot ? 'selected' : ''}`} onClick={() => s.selectSlot(i)}>
+            <button key={i} className={`slot ${s.tool === 'block' && i === s.selectedSlot ? 'selected' : ''}`} onClick={() => s.selectTool(i)}>
               <span className="num">{i + 1}</span>
               {icon && <img src={icon} alt="" />}
               <span className="name">{def?.name ?? ''}</span>
             </button>
           );
         })}
+        <button className={`slot destroy ${s.tool === 'destroy' ? 'selected' : ''}`} onClick={() => s.selectTool('destroy')}>
+          <span className="num">0</span>
+          <span className="tool-icon">🔨</span>
+          <span className="name">Destroy</span>
+        </button>
       </div>
     </div>
   );
