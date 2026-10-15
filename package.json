@@ -14,7 +14,8 @@
     "dev:server": "npm --prefix dev-server run dev",
     "dev:all": "concurrently -k -n server,game -c cyan,magenta \"npm run dev:server\" \"npm run dev\"",
     "setup": "npm install && npm --prefix dev-server install",
-    "build:pages": "vite build"
+    "build:pages": "vite build",
+    "test:client": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",

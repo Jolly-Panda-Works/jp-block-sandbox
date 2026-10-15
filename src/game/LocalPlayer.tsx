@@ -12,6 +12,7 @@ import { animalStates, remotes, send } from '../net/network';
 import { useGame, selectedBlock } from '../state/store';
 import { Avatar } from '../render/Avatar';
 import { applyGamePose, getAnim, now, playSwing } from '../render/animState';
+import { newCameraRig, solveCamera } from './cameraRig';
 import { getBlockGeometry, getBlockMaterials } from '../render/textures';
 import { Hammer } from '../render/Hammer';
 
@@ -57,7 +58,7 @@ export function LocalPlayer() {
   const arm = useRef<THREE.Group>(null);
   const armInner = useRef<THREE.Group>(null);
   const st = useRef({
-    blend: 1, camDist: TP_DISTANCE, lastGround: -9, lastJump: -9, nextRepeat: 0, sendAt: 0, bodyYaw: 0,
+    blend: 1, rig: newCameraRig(TP_DISTANCE, SHOULDER), lastGround: -9, lastJump: -9, nextRepeat: 0, sendAt: 0, bodyYaw: 0,
     faceAimUntil: 0, nearKey: '', offKey: '', framedFor: '', nearby: null as StallInfo | null, hidden: false, layerKey: '', lastLook: null as unknown, armSwing: -9, bob: 0,
   });
 
@@ -135,14 +136,12 @@ export function LocalPlayer() {
     const dir = new THREE.Vector3(fx * cp, -Math.sin(b.pitch), fz * cp);
     const eye = new THREE.Vector3(b.x, b.y + EYE_HEIGHT, b.z);
     const head = new THREE.Vector3(b.x, b.y + PIVOT_HEIGHT, b.z);
-    let shoulder = SHOULDER;
-    const side = voxelRaycast(head.x, head.y, head.z, rx, 0, rz, SHOULDER + 0.3, solid);
-    if (side.hit) shoulder = Math.max(0, side.distance - 0.3);
-    const pivot = head.clone().add(new THREE.Vector3(rx * shoulder, 0, rz * shoulder));
-    const back = voxelRaycast(pivot.x, pivot.y, pivot.z, -dir.x, -dir.y, -dir.z, TP_DISTANCE + 0.3, solid);
-    const wanted = back.hit ? Math.max(0.2, back.distance - 0.3) : TP_DISTANCE;
-    s.camDist = wanted < s.camDist ? wanted : lerp(s.camDist, wanted, 1 - Math.exp(-6 * dt)); // pull in instantly, recover smoothly
-    const third = pivot.clone().addScaledVector(dir, -s.camDist);
+    // Collision-aware, smoothed third-person camera (no jumps when brushing walls or turning; see cameraRig.ts).
+    const tp = solveCamera(s.rig, {
+      head: [head.x, head.y, head.z], dir: [dir.x, dir.y, dir.z], right: [rx, 0, rz],
+      solid, maxDist: TP_DISTANCE, shoulder: SHOULDER, dt, t,
+    });
+    const third = new THREE.Vector3(tp[0], tp[1], tp[2]);
     camera.position.lerpVectors(eye, third, smooth);
     camera.rotation.set(-b.pitch, b.yaw + Math.PI, 0, 'YXZ');
 
