@@ -111,15 +111,29 @@ How a session works:
 
 Timings are Custom settings: `inviteAcceptDelaySec`, `rpsPickSec`, `rpsBestOf`, `tttTurnSec`, `chessTurnSec` and `ludoTurnSec`. Locally they come from `dev-server/settings.json`.
 
-### Bots and the Game Center
+### Island life: wandering bots, the Game Center and animals
 
-- **🤖 Bot** in the Games panel (P) starts Rock Paper Scissors, Tic Tac Toe or Chess against the computer right away. For Ludo it opens a table with a bot, and the host can **Add bot** up to 4 players, mixing bots and people.
-- **Game Center** is the fenced stone area next to the plaza, signposted "Game Center". Four characters wait there, one per game: 🤖 Rocky plays Rock Paper Scissors, Tessa plays Tic Tac Toe, Magnus plays Chess and Lulu plays Ludo. Walk up to one and press **E**. While a character is playing, others can watch with **E**.
-- **Bot AI:** the AIs are quick and simple, so they never slow the shared server, and they are slightly random so they can be beaten.
-  - Tic Tac Toe: wins when it can, otherwise blocks.
-  - Chess: captures for profit and avoids leaving pieces hanging.
-  - Ludo: prefers finishing, capturing and leaving base.
-- **Bodies:** bots sit at the table and animate like players. They "think" for about a second before moving.
+The server simulates everything below, so every player sees the same bots and animals in the same places.
+
+**Wandering bots** (`ambientBots`, default 4) stroll around the island:
+- They chat with each other: when two meet, one says something and the other replies.
+- They show emoji and emotes.
+- Sometimes they walk over to a running game and **watch** it.
+
+**Joining unanswered invites:** when a player posts an invite and nobody accepts within **5 seconds** (`botJoinAfterSec`), a random free bot walks over and plays. For Ludo, the bot sits down at the table and the host's start panel opens.
+
+**Bot rules:**
+- The host can't add bots by hand.
+- Bots are not counted in the "players" number.
+
+**Game Center:** the fenced area next to the plaza. Four characters wait there, one per game: Rocky (Rock Paper Scissors), Tessa (Tic Tac Toe), Magnus (Chess) and Lulu (Ludo). Walk up and press **E**.
+
+**Bot AI:** the AIs are quick and slightly random, so they can be beaten.
+- Tic Tac Toe: wins when it can, otherwise blocks.
+- Chess: captures for profit and avoids leaving pieces hanging.
+- Ludo: prefers finishing, capturing and leaving base.
+
+**Animals** (`animals: true`): cows, sheep, pigs and cats wander the meadows.
 
 ## Controls
 

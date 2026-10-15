@@ -38,6 +38,8 @@ interface GameState {
   nearGame: { id: string; kind: MiniGameKind } | null;
   /** Free Game Center character in reach. */
   nearNpc: { id: string; name: string; kind: MiniGameKind } | null;
+  /** Animals on the island (id + kind; positions live in net/network.ts animalStates). */
+  animals: { id: string; kind: string }[];
   layout: IslandLayout | null;
   profile: ProfileData;
   selectedSlot: number;
@@ -100,6 +102,7 @@ export const useGame = create<GameState>()((set, get) => ({
   nearInvite: null,
   nearGame: null,
   nearNpc: null,
+  animals: [],
   layout: null,
   profile: createProfile(),
   selectedSlot: 0,

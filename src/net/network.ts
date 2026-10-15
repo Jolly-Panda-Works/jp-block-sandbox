@@ -26,8 +26,13 @@ export interface RemoteState extends PlayerSnapshot {
 type StatePlayer = PlayerSnapshot & { inv?: MiniGameKind | ''; invAgeMs?: number; mg?: string };
 export const remotes = new Map<string, RemoteState>();
 
+/** Latest replicated animal transforms; r* fields are interpolated render values. */
+export interface AnimalState { kind: string; x: number; y: number; z: number; yaw: number; moving: boolean; rx: number; ry: number; rz: number; ryaw: number }
+export const animalStates = new Map<string, AnimalState>();
+type AnimalSnapshot = { id: string; kind: string; x: number; y: number; z: number; yaw: number; moving: boolean };
+
 /** Extra fields the Rastaar server adds to every `state` message. */
-type StateMessage = Omit<ServerMessages['state'], 'players'> & { players: StatePlayer[]; phase?: 'playing' | 'finished'; timeLeftMs?: number; games?: MgListing[]; acceptDelayMs?: number };
+type StateMessage = Omit<ServerMessages['state'], 'players'> & { players: StatePlayer[]; phase?: 'playing' | 'finished'; timeLeftMs?: number; games?: MgListing[]; acceptDelayMs?: number; animals?: AnimalSnapshot[] };
 
 let client: Client | null = null;
 let room: Room | null = null;
@@ -228,6 +233,13 @@ function attach(r: Room): void {
     for (const id of remotes.keys()) if (!seen.has(id)) remotes.delete(id);
     const timeLeftMs = typeof m.timeLeftMs === 'number' ? m.timeLeftMs : 0;
     if (timeLeftMs !== get().timeLeftMs) set({ timeLeftMs });
+    const animals = m.animals ?? [];
+    for (const a of animals) {
+      const s = animalStates.get(a.id);
+      if (s) Object.assign(s, a);
+      else animalStates.set(a.id, { ...a, rx: a.x, ry: a.y, rz: a.z, ryaw: a.yaw });
+    }
+    if (animals.length !== get().animals.length) set({ animals: animals.map((a) => ({ id: a.id, kind: a.kind })) });
     const games = m.games ?? [];
     if (JSON.stringify(games) !== JSON.stringify(get().games)) set({ games });
     if (delay !== get().acceptDelayMs) set({ acceptDelayMs: delay });

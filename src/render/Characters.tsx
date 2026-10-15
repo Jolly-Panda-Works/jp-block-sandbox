@@ -142,5 +142,6 @@ function BotSeat({ game, seat }: { game: MgListing; seat: MgListing['seats'][num
 /** Bots and NPCs taking part in a mini-game, drawn at their seat (seated or playing Rock Paper Scissors). */
 export function BotSeats() {
   const games = useGame((s) => s.games);
-  return <>{games.flatMap((g) => g.seats.filter((x) => isBotId(x.id)).map((x) => <BotSeat key={x.id} game={g} seat={x} />))}</>;
+  const bodies = useGame((s) => s.players);
+  return <>{games.flatMap((g) => g.seats.filter((x) => isBotId(x.id) && !bodies[x.id]).map((x) => <BotSeat key={x.id} game={g} seat={x} />))}</>;
 }

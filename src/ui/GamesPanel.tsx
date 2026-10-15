@@ -17,11 +17,7 @@ export function GamesPanel() {
     close();
   };
   const isHost = !!lobby && lobby.hostId === sessionId;
-  /** 2-player games start right away against a bot; Ludo opens a table with one bot seated. */
-  const playBot = (kind: (typeof MINI_GAMES)[number]['kind']) => {
-    send('mgBot', { kind });
-    if (kind !== 'ludo') close();
-  };
+
 
   return (
     <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
@@ -29,7 +25,7 @@ export function GamesPanel() {
         <header><h2>🎲 Popup game</h2><button className="close" onClick={close}>✕</button></header>
         {!myInvite && (
           <>
-            <p className="hint">Invite: your game's icon appears above your head and a nearby player joins with <b>E</b> after {Math.round(acceptDelayMs / 1000)} s. 🤖 Bot: play against the computer now. Or visit the <b>Game Center</b> next to the plaza.</p>
+            <p className="hint">Your game's icon appears above your head and a nearby player joins with <b>E</b> after {Math.round(acceptDelayMs / 1000)} s. If nobody does, a 🤖 bot walking around the island may come over and play. You can also visit the <b>Game Center</b> next to the plaza.</p>
             <div className="game-grid">
               {MINI_GAMES.map((g) => (
                 <div key={g.kind} className="game-card">
@@ -38,7 +34,6 @@ export function GamesPanel() {
                   <small>{g.minPlayers === g.maxPlayers ? `${g.minPlayers} players` : `${g.minPlayers}–${g.maxPlayers} players`}</small>
                   <div className="game-actions">
                     <button className="primary" onClick={() => post(g.kind)}>Invite</button>
-                    <button onClick={() => playBot(g.kind)} title="Play against the computer">🤖 Bot</button>
                   </div>
                 </div>
               ))}
@@ -53,7 +48,6 @@ export function GamesPanel() {
               <>
                 <p className="hint">Players at your table ({lobby!.members.length}/4):</p>
                 <ul className="lobby-members">{lobby!.members.map((m) => <li key={m.id} dir="auto">{m.id === sessionId ? `${m.name} (you)` : m.name}</li>)}</ul>
-                <button className="wide" disabled={lobby!.members.length >= 4} onClick={() => send('mgAddBot', {})}>🤖 Add bot</button>
                 <button className="primary wide" disabled={lobby!.members.length < 2} onClick={() => { send('mgStart', {}); close(); }}>
                   {lobby!.members.length < 2 ? 'Waiting for players…' : `Start with ${lobby!.members.length} players`}
                 </button>

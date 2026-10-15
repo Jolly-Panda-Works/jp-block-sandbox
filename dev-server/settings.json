@@ -8,5 +8,8 @@
   "rpsBestOf": 3,
   "tttTurnSec": 15,
   "chessTurnSec": 60,
-  "ludoTurnSec": 10
+  "ludoTurnSec": 10,
+  "ambientBots": 4,
+  "animals": true,
+  "botJoinAfterSec": 5
 }

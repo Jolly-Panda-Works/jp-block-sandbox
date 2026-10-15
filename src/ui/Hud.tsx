@@ -8,7 +8,7 @@ import { lockPointer, togglePanel } from '../game/pointer';
 import { LookArea, TouchControls } from './TouchControls';
 import { MiniGameOverlay } from './MiniGameOverlay';
 import { send } from '../net/network';
-import { miniGameInfo } from '@jp/blocksy-shared';
+import { isBotId, miniGameInfo } from '@jp/blocksy-shared';
 
 /** E near an invite → accept (after the delay); near a running game → watch. Returns true if handled. */
 export function interactMiniGame(): boolean {
@@ -34,7 +34,7 @@ const formatTime = (ms: number) => {
 /** In-game overlay modelled on the references. */
 export function Hud() {
   const s = useGame();
-  const count = Object.keys(s.players).length;
+  const count = Object.keys(s.players).filter((id) => !isBotId(id)).length; // people only, not bots
   const playing = s.panel === 'none';
   return (
     <div className="hud">

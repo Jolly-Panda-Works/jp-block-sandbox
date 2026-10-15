@@ -795,8 +795,6 @@ interface ClientMessages {
   mgLeave: Record<string, never>;
   mgSpectate: { gameId: string };
   rename: { name: string };
-  mgBot: { kind: MiniGameKind };
-  mgAddBot: Record<string, never>;
   mgNpc: { npcId: string };
 }
 
@@ -1331,6 +1329,9 @@ interface GameCenterNpc { id: string; name: string; kind: MiniGameKind; x: numbe
 interface BlocksySettings {
   worldSeed: number;
   inviteAcceptDelaySec: number;
+  ambientBots: number;
+  animals: boolean;
+  botJoinAfterSec: number;
   rpsPickSec: number;
   rpsBestOf: number;
   tttTurnSec: number;
@@ -1348,6 +1349,9 @@ function readSettings(roomName: string): BlocksySettings {
   return {
     worldSeed: int(raw.worldSeed, 1337, 1, 2_147_483_647),
     inviteAcceptDelaySec: int(raw.inviteAcceptDelaySec, 5, 0, 60),
+    ambientBots: int(raw.ambientBots, 4, 0, 8),
+    animals: typeof raw.animals === 'boolean' ? raw.animals : true,
+    botJoinAfterSec: int(raw.botJoinAfterSec, 5, 1, 120),
     rpsPickSec: int(raw.rpsPickSec, 3, 2, 15),
     rpsBestOf: int(raw.rpsBestOf, 3, 1, 9),
     tttTurnSec: int(raw.tttTurnSec, 15, 5, 120),
@@ -1410,7 +1414,7 @@ interface Player {
 
 /** Messages per second per player. "move" is sent at 15 Hz by the client. */
 const RATE_LIMITS: Record<string, number> = {
-  rename: 1, mgBot: 2, mgAddBot: 3, mgNpc: 2, mgInvite: 2, mgCancel: 2, mgAccept: 2, mgStart: 2, mgMove: 6, mgLeave: 2, mgSpectate: 2,
+  rename: 1, mgNpc: 2, mgInvite: 2, mgCancel: 2, mgAccept: 2, mgStart: 2, mgMove: 6, mgLeave: 2, mgSpectate: 2,
   move: 20, place: 12, remove: 12, hotbar: 10, buy: 5, appearance: 2, restore: 1, chat: 2, emoji: 2, emote: 1,
 };
 const STATE_INTERVAL_MS = 100;
@@ -1482,37 +1486,40 @@ class MiniGameHub {
   locked(id: string): boolean { return this.seatOf.has(id) || this.watching.has(id) || this.lobbyOf.has(id); }
   private nameOf(id: string): string { return this.d.players.get(id)?.username ?? this.botNames.get(id) ?? 'Player'; }
 
-  /** Creates a bot that stands `dist` metres from the host, at an angle around the host's facing. */
-  private newBot(host: Player, dist: number, angle: number): string {
-    const id = `bot:${(this.botCounter++).toString(36)}`;
-    this.botNames.set(id, `🤖 ${BOT_NAMES[this.botCounter % BOT_NAMES.length]}`);
-    const yaw = host.yaw + angle;
-    const x = host.x + Math.sin(yaw) * dist, z = host.z + Math.cos(yaw) * dist;
-    this.botSpots.set(id, { x, y: host.y, z, yaw: Math.atan2(host.x - x, host.z - z) });
-    return id;
+  /** Open invites, oldest first (for wandering bots looking for someone to play with). */
+  openInvites(): { hostId: string; kind: MiniGameKind; ageMs: number }[] {
+    const now = Date.now();
+    return [...this.invites.values()].map((i) => ({ hostId: i.hostId, kind: i.kind, ageMs: now - i.since })).sort((a, b) => b.ageMs - a.ageMs);
   }
 
-  /** Host plays against a bot (2-player games), or opens a Ludo table with one bot seated. */
-  playBot(id: string, kind: MiniGameKind): string | null {
-    const host = this.d.players.get(id);
-    if (!host || this.locked(id)) return 'You are already in a game.';
-    if (kind === 'ludo') {
-      if (this.invites.get(id)?.kind !== 'ludo') this.invite(id, 'ludo');
-      return this.addBot(id);
+  /** Is this id seated in a game or waiting in a Ludo lobby? */
+  busy(id: string): boolean { return this.seatOf.has(id) || this.lobbyOf.has(id); }
+
+  /** Seat of a seated bot (so the wandering-bot body sits where the game put it). */
+  seatSpot(id: string): { x: number; z: number; yaw: number; y: number } | null {
+    const sid = this.seatOf.get(id);
+    const s = sid ? this.sessions.get(sid) : undefined;
+    const seat = s?.seatPos.find((x) => x.id === id);
+    return s && seat ? { ...seat, y: s.table.y } : null;
+  }
+
+  /** A wandering bot accepts an invite it walked up to (no waiting delay: it already waited). */
+  botAccept(botId: string, hostId: string, name: string, spot: Spot): boolean {
+    const inv = this.invites.get(hostId);
+    if (!inv || this.busy(botId) || this.locked(hostId) && inv.kind !== 'ludo') return false;
+    this.botNames.set(botId, name);
+    this.botSpots.set(botId, spot);
+    if (inv.kind !== 'ludo') {
+      this.invites.delete(hostId);
+      inv.expiry?.clear();
+      this.start(inv.kind, [hostId, botId]);
+      return true;
     }
-    this.cancel(id);
-    this.start(kind, [id, this.newBot(host, 2, 0)]);
-    return null;
-  }
-
-  /** Ludo host: seat a bot at the table (up to 4 players). */
-  addBot(hostId: string): string | null {
-    const inv = this.invites.get(hostId), host = this.d.players.get(hostId);
-    if (!inv || inv.kind !== 'ludo' || !host) return 'Open a Ludo table first.';
-    if (inv.guests.length >= 3) return 'This Ludo table is full.';
-    inv.guests.push(this.newBot(host, 1.6, Math.PI / 2 + inv.guests.length * (Math.PI / 2)));
+    if (inv.guests.length >= 3 || inv.guests.includes(botId)) return false;
+    inv.guests.push(botId);
+    this.lobbyOf.set(botId, hostId);
     this.sendLobby(inv);
-    return null;
+    return true;
   }
 
   /** Play with a Game Center character (one game at a time per character). */
@@ -1567,7 +1574,7 @@ class MiniGameHub {
     for (const g of [hostId, ...inv.guests]) {
       this.lobbyOf.delete(g);
       this.d.send(g, 'mgLobby', null);
-      if (g.startsWith('bot:')) { this.botNames.delete(g); this.botSpots.delete(g); }
+      if (isBotId(g)) this.botSpots.delete(g);
     }
   }
 
@@ -1796,7 +1803,7 @@ class MiniGameHub {
   private close(s: MgSession): void {
     s.timer?.clear();
     for (const t of s.botTimers) t.clear();
-    for (const id of s.seats) if (id.startsWith('bot:')) { this.botNames.delete(id); this.botSpots.delete(id); }
+    for (const id of s.seats) if (isBotId(id)) this.botSpots.delete(id);
     this.sessions.delete(s.id);
     for (const id of [...s.seats, ...s.spectators]) {
       if (this.seatOf.get(id) === s.id) this.seatOf.delete(id);
@@ -1905,6 +1912,225 @@ class MiniGameHub {
   }
 }
 
+
+// =====================================================================================================
+// AMBIENT LIFE — wandering bots (talk, emote, join unanswered invites, watch games) and farm animals.
+// Simulated on the server (in the 100 ms state tick) so every player sees the same thing.
+// =====================================================================================================
+
+type AnimalKind = 'cow' | 'sheep' | 'pig' | 'cat';
+interface Walker { id: string; x: number; y: number; z: number; yaw: number; tx: number; tz: number; moving: boolean; waitUntil: number; speed: number }
+type BotTask =
+  | { type: 'wander' }
+  | { type: 'join'; hostId: string; until: number }
+  | { type: 'watch'; gameId: string; until: number }
+  | { type: 'talk'; with: string; until: number; replyAt: number; line: number; replied: boolean };
+interface AmbientBot extends Walker { name: string; appearance: Appearance; task: BotTask; nextSocial: number; nextTalk: number; nextWatch: number }
+interface Animal extends Walker { kind: AnimalKind }
+
+const CONVERSATIONS: [string, string][] = [
+  ['Hi!', 'Hey there!'], ["What's up?", 'Just building stuff.'], ['Nice island!', 'I love the lanterns.'],
+  ['Want to play?', 'Maybe later!'], ['Did you see the cows?', 'Moo! 😄'], ['Good game earlier!', 'Thanks, rematch soon!'],
+];
+const SOLO_LINES = ['What a nice day!', 'Anyone up for a game?', 'I like this island.', 'Hmm…', 'Look at that tree!'];
+const ANIMAL_SPEED: Record<AnimalKind, number> = { cow: 0.8, sheep: 0.7, pig: 0.9, cat: 1.4 };
+
+class AmbientLife {
+  readonly bots: AmbientBot[] = [];
+  readonly animals: Animal[] = [];
+  /** Walkable columns: "x,z" → feet height (top of the ground + 1). */
+  private readonly walk = new Map<string, number>();
+  private readonly cells: [number, number][] = [];
+
+  constructor(
+    grid: BlockGrid,
+    layout: IslandLayout,
+    settings: BlocksySettings,
+    private readonly hub: MiniGameHub,
+    private readonly players: Map<string, Player>,
+    private readonly say: (type: 'chat' | 'emoji' | 'emote', id: string, value: string) => void,
+  ) {
+    const cx = Math.floor(layout.center.x), cz = Math.floor(layout.center.z);
+    for (let x = cx - 21; x <= cx + 21; x++) for (let z = cz - 21; z <= cz + 21; z++) {
+      if (Math.hypot(x - cx, z - cz) > 20) continue;
+      for (let y = 12; y >= 2; y--) {
+        const ground = getBlock(grid.get(x, y, z));
+        if (!ground?.solid || ground.shape !== 'cube') continue;
+        const feet = getBlock(grid.get(x, y + 1, z)), head = getBlock(grid.get(x, y + 2, z));
+        if (!feet?.solid && !head?.solid) { this.walk.set(`${x},${z}`, y + 1); this.cells.push([x, z]); }
+        break;
+      }
+    }
+    if (this.cells.length === 0) return;
+    const rnd = () => this.cells[Math.floor(Math.random() * this.cells.length)];
+    for (let i = 0; i < settings.ambientBots; i++) {
+      const [x, z] = rnd();
+      const id = `bot:w${i}`;
+      this.bots.push({
+        id, name: `🤖 ${BOT_NAMES[i % BOT_NAMES.length]}`, appearance: randomAppearanceFor(id),
+        x: x + 0.5, y: this.walk.get(`${x},${z}`)!, z: z + 0.5, yaw: Math.random() * 6.28, tx: x + 0.5, tz: z + 0.5,
+        moving: false, waitUntil: 0, speed: 1.6, task: { type: 'wander' },
+        nextSocial: Date.now() + 4000 + Math.random() * 8000, nextTalk: Date.now() + 6000 + Math.random() * 10000, nextWatch: Date.now() + 15000 + Math.random() * 20000,
+      });
+    }
+    if (settings.animals) {
+      const kinds: AnimalKind[] = ['cow', 'cow', 'sheep', 'sheep', 'sheep', 'pig', 'pig', 'cat', 'cat'];
+      kinds.forEach((kind, i) => {
+        const [x, z] = rnd();
+        this.animals.push({ id: `a${i}`, kind, x: x + 0.5, y: this.walk.get(`${x},${z}`)!, z: z + 0.5, yaw: Math.random() * 6.28, tx: x + 0.5, tz: z + 0.5, moving: false, waitUntil: 0, speed: ANIMAL_SPEED[kind] });
+      });
+    }
+  }
+
+  tick(dt: number, joinAfterMs: number): void {
+    const now = Date.now();
+    this.assignInvites(now, joinAfterMs);
+    for (const b of this.bots) this.tickBot(b, dt, now);
+    for (const a of this.animals) {
+      if (!a.moving && now >= a.waitUntil) this.pickTarget(a, 8);
+      this.step(a, dt, false, () => { a.waitUntil = now + 3000 + Math.random() * 9000; });
+    }
+  }
+
+  /** An invite nobody answered for a while gets a free bot walking over to play. */
+  private assignInvites(now: number, joinAfterMs: number): void {
+    for (const inv of this.hub.openInvites()) {
+      if (inv.ageMs < joinAfterMs || !this.players.has(inv.hostId)) continue;
+      if (this.bots.some((b) => b.task.type === 'join' && b.task.hostId === inv.hostId)) continue;
+      const free = this.bots.filter((b) => !this.hub.busy(b.id) && (b.task.type === 'wander' || b.task.type === 'watch'));
+      if (free.length === 0) return;
+      const b = free[Math.floor(Math.random() * free.length)];
+      b.task = { type: 'join', hostId: inv.hostId, until: now + 25000 };
+      b.speed = 2.6;
+      b.waitUntil = 0;
+    }
+  }
+
+  private tickBot(b: AmbientBot, dt: number, now: number): void {
+    // Seated in a game (or waiting at a Ludo table): the body sits where the game put it.
+    const seat = this.hub.seatSpot(b.id);
+    if (seat) { b.x = seat.x; b.z = seat.z; b.y = seat.y; b.yaw = seat.yaw; b.moving = false; b.task = { type: 'wander' }; b.speed = 1.6; return; }
+    if (this.hub.busy(b.id)) { b.moving = false; return; }
+
+    const task = b.task;
+    if (task.type === 'join') {
+      const host = this.players.get(task.hostId);
+      if (!host || now > task.until || !this.hub.openInvites().some((i) => i.hostId === task.hostId)) { this.toWander(b); return; }
+      const d = Math.hypot(host.x - b.x, host.z - b.z);
+      if (d < 1.8) {
+        b.moving = false;
+        b.yaw = Math.atan2(host.x - b.x, host.z - b.z);
+        if (!this.hub.botAccept(b.id, task.hostId, b.name, { x: b.x, y: b.y, z: b.z, yaw: b.yaw })) this.toWander(b);
+        return;
+      }
+      b.tx = host.x; b.tz = host.z; b.moving = true;
+      this.step(b, dt, true, () => undefined); // may squeeze past fences to reach the host
+      return;
+    }
+    if (task.type === 'talk') {
+      const other = this.bots.find((o) => o.id === task.with);
+      if (!other || now > task.until) { this.toWander(b); return; }
+      b.moving = false;
+      b.yaw = Math.atan2(other.x - b.x, other.z - b.z);
+      if (!task.replied && task.replyAt > 0 && now >= task.replyAt) {
+        task.replied = true;
+        this.say('chat', b.id, CONVERSATIONS[task.line][1]);
+        if (Math.random() < 0.4) this.say('emote', b.id, Math.random() < 0.5 ? 'happy' : 'wave');
+      }
+      return;
+    }
+    if (task.type === 'watch') {
+      const game = this.hub.listing().find((g) => g.id === task.gameId);
+      if (!game || game.phase === 'over' || now > task.until) { this.toWander(b); return; }
+      if (b.moving) { this.step(b, dt, false, () => undefined); return; }
+      b.yaw = Math.atan2(game.x - b.x, game.z - b.z);
+      return;
+    }
+
+    // Wandering: chat with a nearby bot now and then, go and watch a game, emote, walk.
+    if (now >= b.nextTalk && !b.moving) {
+      const partner = this.bots.find((o) => o !== b && o.task.type === 'wander' && !this.hub.busy(o.id) && Math.hypot(o.x - b.x, o.z - b.z) < 4);
+      if (partner) {
+        const line = Math.floor(Math.random() * CONVERSATIONS.length);
+        b.task = { type: 'talk', with: partner.id, until: now + 5000, replyAt: 0, line, replied: true };
+        partner.task = { type: 'talk', with: b.id, until: now + 5000, replyAt: now + 1600, line, replied: false };
+        partner.moving = false;
+        this.say('chat', b.id, CONVERSATIONS[line][0]);
+        b.nextTalk = partner.nextTalk = now + 20000 + Math.random() * 20000;
+        return;
+      }
+      b.nextTalk = now + 4000;
+    }
+    if (now >= b.nextWatch) {
+      b.nextWatch = now + 25000 + Math.random() * 30000;
+      const games = this.hub.listing().filter((g) => g.phase !== 'over');
+      if (games.length && Math.random() < 0.6) {
+        const g = games[Math.floor(Math.random() * games.length)];
+        const a = Math.random() * Math.PI * 2;
+        b.task = { type: 'watch', gameId: g.id, until: now + 15000 + Math.random() * 15000 };
+        b.tx = g.x + Math.cos(a) * 3; b.tz = g.z + Math.sin(a) * 3; b.moving = true;
+        return;
+      }
+    }
+    if (now >= b.nextSocial) {
+      b.nextSocial = now + 10000 + Math.random() * 15000;
+      const r = Math.random();
+      if (r < 0.35) this.say('emoji', b.id, ['smile', 'heart', 'thumbs', 'laugh', 'wow', 'wave'][Math.floor(Math.random() * 6)]);
+      else if (r < 0.65) this.say('emote', b.id, ['happy', 'wave', 'happy'][Math.floor(Math.random() * 3)]);
+      else this.say('chat', b.id, SOLO_LINES[Math.floor(Math.random() * SOLO_LINES.length)]);
+    }
+    if (!b.moving && now >= b.waitUntil) this.pickTarget(b, 10);
+    this.step(b, dt, false, () => { b.waitUntil = now + 2000 + Math.random() * 5000; });
+  }
+
+  private toWander(b: AmbientBot): void {
+    b.task = { type: 'wander' };
+    b.speed = 1.6;
+    b.moving = false;
+    b.waitUntil = Date.now() + 1500;
+  }
+
+  private pickTarget(w: Walker, range: number): void {
+    for (let i = 0; i < 6; i++) {
+      const [x, z] = this.cells[Math.floor(Math.random() * this.cells.length)];
+      if (Math.hypot(x + 0.5 - w.x, z + 0.5 - w.z) > range) continue;
+      w.tx = x + 0.5; w.tz = z + 0.5; w.moving = true;
+      return;
+    }
+    w.waitUntil = Date.now() + 1000;
+  }
+
+  /** Moves toward the target on walkable ground; stops at obstacles (unless `squeeze`). */
+  private step(w: Walker, dt: number, squeeze: boolean, onArrive: () => void): void {
+    if (!w.moving) return;
+    const dx = w.tx - w.x, dz = w.tz - w.z, d = Math.hypot(dx, dz);
+    if (d < 0.3) { w.moving = false; onArrive(); return; }
+    const k = Math.min(1, (w.speed * dt) / d);
+    const nx = w.x + dx * k, nz = w.z + dz * k;
+    const feet = this.walk.get(`${Math.floor(nx)},${Math.floor(nz)}`);
+    if (feet === undefined || Math.abs(feet - w.y) > 1.01) {
+      if (!squeeze) { w.moving = false; w.waitUntil = Date.now() + 800; return; }
+    } else w.y = feet;
+    w.x = nx; w.z = nz;
+    w.yaw = Math.atan2(dx, dz);
+  }
+}
+
+function randomAppearanceFor(id: string): Appearance {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 16777619); }
+  const rng = createRng(h >>> 0);
+  const pick = <T>(l: readonly T[]) => l[Math.floor(rng() * l.length)];
+  return sanitizeAppearance({
+    skin: pick(['#f6d3b3', '#edb98a', '#e0ac7e', '#c68642', '#9e6b43', '#7a4a2a']),
+    hair: pick(['short', 'long', 'spiky', 'ponytail']), hairColor: pick(['#1e1e1e', '#3b2416', '#5a3a22', '#c89b5a', '#b5452f']),
+    shirt: pick(['tshirt', 'longsleeve', 'hoodie', 'tank']), shirtColor: pick(['#2bb3a8', '#e8584b', '#f2c230', '#9b6bd6', '#3e78d6', '#3a9e4f']),
+    pants: pick(['jeans', 'shorts', 'cargo']), pantsColor: pick(['#2e3a7a', '#2a2a2e', '#8a6a4a']),
+    shoes: pick(['sneakers', 'boots']), shoeColor: pick(['#6b6f78', '#2a2a2e', '#f2f2f2']),
+    hat: rng() < 0.3 ? pick(['cap', 'beanie']) : 'none', hatColor: pick(['#e8584b', '#3e78d6', '#f2c230']),
+  });
+}
+
 export default class BlocksyRoom extends Room {
   private readonly grid: BlockGrid = createWorldGrid();
   private layout!: IslandLayout;
@@ -1921,6 +2147,7 @@ export default class BlocksyRoom extends Room {
   private finished = false;
   private stateTimer: Delayed | null = null;
   private hub!: MiniGameHub;
+  private life!: AmbientLife;
   private sessionTimer: Delayed | null = null;
 
   onCreate(options: Record<string, unknown> = {}): void {
@@ -1928,13 +2155,21 @@ export default class BlocksyRoom extends Room {
     this.multiplayerId = sanitizeMultiplayerId(options.multiplayerId, DEFAULT_MULTIPLAYER_ID);
     this.layout = generateIsland(this.grid, this.settings.worldSeed);
     this.startedAt = Date.now();
-    this.stateTimer = this.clock.setInterval(() => this.broadcastState(), STATE_INTERVAL_MS);
+    this.stateTimer = this.clock.setInterval(() => {
+      this.life?.tick(STATE_INTERVAL_MS / 1000, this.settings.botJoinAfterSec * 1000);
+      this.broadcastState();
+    }, STATE_INTERVAL_MS);
     this.hub = new MiniGameHub({
       clock: this.clock,
       players: this.players,
       settings: () => this.settings,
       send: (id, type, msg) => { for (const c of this.clients) if (c.sessionId === id) c.send(type, msg); },
       npcs: () => this.layout.gameCenter.npcs,
+    });
+    this.life = new AmbientLife(this.grid, this.layout, this.settings, this.hub, this.players, (type, id, value) => {
+      if (type === 'chat') this.broadcast('chat', { sessionId: id, text: value });
+      else if (type === 'emoji') this.broadcast('emoji', { sessionId: id, id: value });
+      else if (!this.hub.playing(id)) this.broadcast('emote', { sessionId: id, id: value });
     });
     // The session timer starts after the first join, once the match config is known (see startSessionTimer).
 
@@ -1960,16 +2195,6 @@ export default class BlocksyRoom extends Room {
     });
     this.onMessage('mgInvite', (c: Client, m: { kind?: unknown }) => {
       if (this.guard(c, 'mgInvite') && isObj(m) && isMiniGameKind(m.kind)) this.hub.invite(c.sessionId, m.kind);
-    });
-    this.onMessage('mgBot', (c: Client, m: { kind?: unknown }) => {
-      if (!this.guard(c, 'mgBot') || !isObj(m) || !isMiniGameKind(m.kind)) return;
-      const err = this.hub.playBot(c.sessionId, m.kind);
-      if (err) c.send('mgError', { message: err });
-    });
-    this.onMessage('mgAddBot', (c: Client) => {
-      if (!this.guard(c, 'mgAddBot')) return;
-      const err = this.hub.addBot(c.sessionId);
-      if (err) c.send('mgError', { message: err });
     });
     this.onMessage('mgNpc', (c: Client, m: { npcId?: unknown }) => {
       if (!this.guard(c, 'mgNpc') || !isObj(m) || typeof m.npcId !== 'string') return;
@@ -2158,7 +2383,7 @@ export default class BlocksyRoom extends Room {
       layout: this.layout,
       profile: p.profile,
       spawn,
-      players: [...this.players.values()].map((pl) => this.metaOf(pl)),
+      players: [...[...this.players.values()].map((pl) => this.metaOf(pl)), ...this.life.bots.map((b) => ({ id: b.id, name: b.name, appearance: b.appearance }))],
     };
     client.send('init', init);
   }
@@ -2176,8 +2401,17 @@ export default class BlocksyRoom extends Room {
         ...this.hub.tags(p.sessionId),
       });
     }
+    for (const b of this.life.bots) {
+      players.push({
+        id: b.id, userId: '', username: b.name, avatarUrl: '',
+        x: round3(b.x), y: round3(b.y), z: round3(b.z), yaw: round3(b.yaw), speed: b.moving ? round3(b.speed / 4.3) : 0,
+        grounded: true, held: AIR, tool: 'none', action: 0, ...this.hub.tags(b.id),
+      });
+    }
+    const animals = this.life.animals.map((a) => ({ id: a.id, kind: a.kind, x: round3(a.x), y: round3(a.y), z: round3(a.z), yaw: round3(a.yaw), moving: a.moving }));
     this.broadcast('state', {
       t: Date.now(),
+      animals,
       phase: this.phase,
       timeLeftMs: this.endsAt ? Math.max(0, this.endsAt - Date.now()) : 0,
       players,

@@ -4,6 +4,7 @@ import { WorldMesh } from './WorldMesh';
 import { LocalPlayer } from '../game/LocalPlayer';
 import { BotSeats, GameCenterNpcs, LocalLabel, RemotePlayers, Shopkeepers } from './Characters';
 import { GameTables } from './GameTables';
+import { Animals } from './Animals';
 
 export function Scene() {
   const layout = useGame((s) => s.layout);
@@ -19,6 +20,7 @@ export function Scene() {
       <GameTables />
       <GameCenterNpcs layout={layout} />
       <BotSeats />
+      <Animals />
     </>
   );
 }
