@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { AIR, createRng, hashString, isBotId, miniGameInfo, randomAppearance, type IslandLayout, type MgListing, type MiniGameKind } from '@jp/blocksy-shared';
 import { Avatar } from './Avatar';
 import { applyGamePose, getAnim, now, playEmote } from './animState';
-import { footstep, land } from './particles';
+import { footstep, land } from './particleFx';
 import { remotes } from '../net/network';
 import { useGame, type PlayerMeta } from '../state/store';
 import { localBody } from '../game/localState';

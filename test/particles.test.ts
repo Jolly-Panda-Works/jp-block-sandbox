@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BlockGrid, blockId } from '../shared/src/index';
 import { world } from '../src/game/world';
-import * as P from '../src/render/particles';
+import * as P from '../src/render/particleFx';
 
 const grid = new BlockGrid(16, 16, 16);
 for (let x = 0; x < 16; x++) for (let z = 0; z < 16; z++) grid.set(x, 4, z, blockId('grass'));

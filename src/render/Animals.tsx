@@ -6,7 +6,7 @@ import { isAnimalKind, variantColors, type AnimalColors, type AnimalKind } from 
 import { useGame } from '../state/store';
 import { animalStates } from '../net/network';
 import { now } from './animState';
-import { footstep } from './particles';
+import { footstep } from './particleFx';
 import { localBody } from '../game/localState';
 
 const DUSTY = new Set(['cow', 'sheep', 'pig', 'llama', 'panda', 'dog', 'fox']);

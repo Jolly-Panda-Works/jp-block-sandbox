@@ -13,7 +13,7 @@ import { useGame, selectedBlock } from '../state/store';
 import { Avatar } from '../render/Avatar';
 import { applyGamePose, getAnim, now, playSwing } from '../render/animState';
 import { newCameraRig, solveCamera } from './cameraRig';
-import { blockBreak, blockPlace, footstep, isWaterAt, land, splash } from '../render/particles';
+import { blockBreak, blockPlace, footstep, isWaterAt, land, splash } from '../render/particleFx';
 import { getBlockGeometry, getBlockMaterials } from '../render/textures';
 import { Hammer } from '../render/Hammer';
 

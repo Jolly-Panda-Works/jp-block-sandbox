@@ -13,7 +13,7 @@ import { getRealtimeCredentials } from './api';
 import { readGameToken, secondsLeft } from './jwt';
 import { lockPointer, openPanel, releasePointer } from '../game/pointer';
 import { localBody } from '../game/localState';
-import * as fx from '../render/particles';
+import * as fx from '../render/particleFx';
 
 /** Latest replicated transform of a remote player; r* fields are the interpolated render values. */
 export interface RemoteState extends PlayerSnapshot {
