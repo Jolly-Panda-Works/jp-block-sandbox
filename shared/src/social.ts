@@ -8,8 +8,20 @@ export type EmojiId = typeof EMOJIS[number]['id'];
 /** Animated emotes. */
 export const EMOTES = [
   { id: 'happy', label: 'Happy', icon: '😄' }, { id: 'cry', label: 'Cry', icon: '😢' }, { id: 'wave', label: 'Wave', icon: '👋' },
+  { id: 'dance', label: 'Dance', icon: '💃' }, { id: 'cheer', label: 'Cheer', icon: '🙌' },
+  // Played automatically (not in the Social panel): petting an animal, waking up, a bot thinking.
+  { id: 'pet', label: 'Pet', icon: '🤲', auto: true }, { id: 'yawn', label: 'Yawn', icon: '🥱', auto: true },
+  { id: 'think', label: 'Think', icon: '🤔', auto: true },
 ] as const;
 export type EmoteId = typeof EMOTES[number]['id'];
+/** Emotes a player can choose in the Social panel. */
+export const PLAYER_EMOTES = EMOTES.filter((e) => !('auto' in e));
+/** How long each emote plays (seconds). */
+export const EMOTE_SECONDS: Record<EmoteId, number> = { happy: 2.8, cry: 2.8, wave: 2.8, dance: 4, cheer: 2.5, pet: 1.4, yawn: 2.2, think: 1.6 };
+
+/** Resting poses that last until the character moves: sitting on the ground and lying down to sleep. */
+export type RestPose = '' | 'sit' | 'sleep';
+export const isRestPose = (v: unknown): v is RestPose => v === '' || v === 'sit' || v === 'sleep';
 
 export const PRESET_MESSAGES = ['Hi!', 'Goodbye!', "What's up?", "I'm happy", "I'm sad", 'Nice build!', 'Follow me!'] as const;
 export const MAX_MESSAGE_LENGTH = 60;
@@ -17,6 +29,7 @@ export const MAX_NAME_LENGTH = 16;
 
 export const isEmojiId = (v: unknown): v is EmojiId => EMOJIS.some((e) => e.id === v);
 export const isEmoteId = (v: unknown): v is EmoteId => EMOTES.some((e) => e.id === v);
+export const isPlayerEmoteId = (v: unknown): v is EmoteId => PLAYER_EMOTES.some((e) => e.id === v);
 
 /** Removes control characters, collapses whitespace and truncates. Empty string = nothing to send. */
 export function sanitizeMessage(raw: unknown, max = MAX_MESSAGE_LENGTH): string {

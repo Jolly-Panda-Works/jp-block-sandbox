@@ -1,10 +1,11 @@
 import { useMemo, useRef, type ReactNode } from 'react';
 import { Hammer } from './Hammer';
 import { useFrame } from '@react-three/fiber';
+import { EMOTE_SECONDS } from '@jp/blocksy-shared';
 import * as THREE from 'three';
 import { AIR, HAND_ANCHOR, JOINTS, MODEL_SCALE, buildAvatarParts, type Appearance, type AvatarPart, type Joint } from '@jp/blocksy-shared';
 import { getBlockGeometry, getBlockMaterials } from './textures';
-import { now, type AnimState } from './animState';
+import { now, type AnimState, gaitFor } from './animState';
 
 const BOX = new THREE.BoxGeometry(1, 1, 1);
 const materialCache = new Map<string, THREE.MeshLambertMaterial>();
@@ -58,19 +59,45 @@ export function Avatar({ appearance, anim, heldBlock = AIR, hammer = false }: Pr
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.05), t = now();
     const s = st.current;
-    s.speed += Math.sign(Math.min(anim.speed, 1.5) - s.speed) * Math.min(Math.abs(Math.min(anim.speed, 1.5) - s.speed), dt * 6);
-    s.phase += s.speed * 11 * dt;
-    if (anim.emote && (anim.speed > 0.25 || t - anim.emoteStart > 2.8)) anim.emote = null; // moving cancels emotes
+    // Walk cycle tied to how fast the character really moves: the swing angle and the step rate go together,
+    // so the feet don't slide over the ground (slow walk = shorter, slower steps).
+    const target = Math.min(anim.speed, 1.5);
+    s.speed += Math.sign(target - s.speed) * Math.min(Math.abs(target - s.speed), dt * 8);
+    const g = gaitFor(s.speed);
+    const swingA = g.swing;
+    s.phase += g.phaseRate * dt;
+    if (anim.emote && (anim.speed > 0.25 || t - anim.emoteStart > (EMOTE_SECONDS[anim.emote] ?? 2.8))) anim.emote = null; // moving cancels emotes
 
-    const amp = Math.min(1, s.speed);
-    const walk = Math.sin(s.phase) * 0.66 * amp;
-    const idle = Math.sin(t * 1.7) * 0.044 * (1 - amp);
-    let lL = walk, lR = -walk, aLx = -walk * 0.8 + idle, aRx = walk * 0.8 - idle, aLz = 0.05, aRz = -0.05, hX = 0, hZ = 0, y = 0;
-    if (!anim.grounded) { lL = -0.38; lR = 0.24; aLz = 0.49; aRz = -0.49; aLx = aRx = -0.17; }
+    const moving = Math.min(1, s.speed * 3);
+    const walk = Math.sin(s.phase) * swingA;
+    const idle = Math.sin(t * 1.7) * 0.044 * (1 - moving);
+    let lL = walk, lR = -walk, aLx = -walk * 0.8 + idle, aRx = walk * 0.8 - idle, aLz = 0.05, aRz = -0.05, hX = 0, hZ = 0;
+    let y = Math.abs(Math.sin(s.phase)) * 0.035 * moving, rx = 0, rz = 0;
+    if (!anim.grounded) { lL = -0.38; lR = 0.24; aLz = 0.49; aRz = -0.49; aLx = aRx = -0.17; y = 0; }
     if (anim.holding && !anim.emote) aRx = Math.min(aRx, -0.31 + walk * 0.25);
 
+    // Poses: resting (sit on the ground, lie down) or mini-game (seated at a table, Rock Paper Scissors).
+    switch (anim.pose) {
+      case 'sit':
+        y = -0.52; lL = lR = -1.5; aLx = aRx = -0.35; aLz = 0.28; aRz = -0.28; hX = 0.05 + Math.sin(t * 0.8) * 0.03;
+        break;
+      case 'sleep':
+        rx = -Math.PI / 2; y = 0.17 + Math.sin(t * 1.6) * 0.008; lL = lR = 0; aLx = aRx = 0; aLz = 0.12; aRz = -0.12; hX = 0; hZ = 0.25;
+        break;
+      case 'seated':
+        y = -0.27; lL = lR = -1.45; aLx = aRx = -0.95; aLz = 0.08; aRz = -0.08; hX = 0.25;   // hands on the board
+        break;
+      case 'rps':
+        if (anim.handItem) { aRx = -1.35; aRz = 0; }                       // shows the chosen item
+        else { aRx = -0.5 - Math.abs(Math.sin(t * 9)) * 0.9; aRz = -0.05; } // "rock… paper… scissors…" pump
+        aLx = -0.2; lL = 0.1; lR = -0.1;
+        break;
+    }
+    const keepLegs = anim.pose === 'seated' || anim.pose === 'rps' || anim.pose === 'sit';
+    const poseLegs = [lL, lR, y, rx] as const;
+
     const e = t - anim.emoteStart;
-    switch (anim.emote) {
+    if (anim.pose !== 'sleep') switch (anim.emote) {
       case 'happy':
         aLx = aRx = 0; aLz = 2.62 + Math.sin(e * 12) * 0.17; aRz = -2.62 - Math.sin(e * 12) * 0.17;
         y = Math.abs(Math.sin(e * 6)) * 0.18; hX = -0.17; lL = lR = 0;
@@ -81,15 +108,31 @@ export function Avatar({ appearance, anim, heldBlock = AIR, hammer = false }: Pr
       case 'wave':
         aRx = 0; aRz = -2.62 + Math.sin(e * 9) * 0.38; hZ = 0.09;
         break;
+      case 'dance': {
+        const k = Math.sin(e * 8);
+        y = Math.abs(k) * 0.12; rz = Math.sin(e * 4) * 0.12; aLx = aRx = 0;
+        aLz = 1.6 + k * 0.9; aRz = -1.6 + k * 0.9; lL = Math.max(0, k) * 0.6; lR = Math.max(0, -k) * 0.6; hZ = -rz * 0.8;
+        break;
+      }
+      case 'cheer':
+        aLx = aRx = 0; aLz = 2.75 + Math.sin(e * 14) * 0.2; aRz = -2.75 - Math.sin(e * 14) * 0.2; hX = -0.25;
+        y = Math.abs(Math.sin(e * 7)) * 0.22;
+        break;
+      case 'pet': {                                                        // bend down and stroke the animal
+        const pat = Math.sin(e * 10) * 0.15;
+        rx = 0.55; y = -0.12; lL = lR = -0.45; aRx = -1.25 + pat; aRz = -0.05; aLx = -0.3; hX = 0.35;
+        break;
+      }
+      case 'yawn': {
+        const k = Math.sin(Math.min(1, e / 2.2) * Math.PI);
+        aLz = 2.4 * k; aRz = -2.4 * k; aLx = aRx = -0.2 * k; hX = -0.45 * k;
+        break;
+      }
+      case 'think':                                                        // hand on chin
+        aRx = -2.1; aRz = 0.55; hX = 0.12; hZ = 0.12;
+        break;
     }
-    if (anim.pose === 'seated') {
-      // Sitting on a stool at the table, hands on the board.
-      y = -0.27; lL = lR = -1.45; aLx = aRx = -0.95; aLz = 0.08; aRz = -0.08; hX = 0.25;
-    } else if (anim.pose === 'rps') {
-      if (anim.handItem) { aRx = -1.35; aRz = 0; }                       // shows the chosen item
-      else { aRx = -0.5 - Math.abs(Math.sin(t * 9)) * 0.9; aRz = -0.05; } // "rock… paper… scissors…" pump
-      aLx = -0.2; lL = 0.1; lR = -0.1;
-    }
+    if (keepLegs && anim.emote) [lL, lR, y, rx] = poseLegs;               // seated: only arms and head emote
     if (rock.current) rock.current.visible = anim.handItem === 'rock';
     if (paper.current) paper.current.visible = anim.handItem === 'paper';
     if (scissors.current) scissors.current.visible = anim.handItem === 'scissors';
@@ -102,6 +145,7 @@ export function Avatar({ appearance, anim, heldBlock = AIR, hammer = false }: Pr
     armR.current?.rotation.set(aRx, 0, aRz);
     head.current?.rotation.set(hX, 0, hZ);
     offset.current?.position.set(0, y, 0);
+    offset.current?.rotation.set(rx, 0, rz);
   });
 
   return (

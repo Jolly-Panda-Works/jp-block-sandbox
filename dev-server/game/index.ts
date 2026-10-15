@@ -872,8 +872,20 @@ type EmojiId = typeof EMOJIS[number]['id'];
 /** Animated emotes. */
 const EMOTES = [
   { id: 'happy', label: 'Happy', icon: '😄' }, { id: 'cry', label: 'Cry', icon: '😢' }, { id: 'wave', label: 'Wave', icon: '👋' },
+  { id: 'dance', label: 'Dance', icon: '💃' }, { id: 'cheer', label: 'Cheer', icon: '🙌' },
+  // Played automatically (not in the Social panel): petting an animal, waking up, a bot thinking.
+  { id: 'pet', label: 'Pet', icon: '🤲', auto: true }, { id: 'yawn', label: 'Yawn', icon: '🥱', auto: true },
+  { id: 'think', label: 'Think', icon: '🤔', auto: true },
 ] as const;
 type EmoteId = typeof EMOTES[number]['id'];
+/** Emotes a player can choose in the Social panel. */
+const PLAYER_EMOTES = EMOTES.filter((e) => !('auto' in e));
+/** How long each emote plays (seconds). */
+const EMOTE_SECONDS: Record<EmoteId, number> = { happy: 2.8, cry: 2.8, wave: 2.8, dance: 4, cheer: 2.5, pet: 1.4, yawn: 2.2, think: 1.6 };
+
+/** Resting poses that last until the character moves: sitting on the ground and lying down to sleep. */
+type RestPose = '' | 'sit' | 'sleep';
+const isRestPose = (v: unknown): v is RestPose => v === '' || v === 'sit' || v === 'sleep';
 
 const PRESET_MESSAGES = ['Hi!', 'Goodbye!', "What's up?", "I'm happy", "I'm sad", 'Nice build!', 'Follow me!'] as const;
 const MAX_MESSAGE_LENGTH = 60;
@@ -881,6 +893,7 @@ const MAX_NAME_LENGTH = 16;
 
 const isEmojiId = (v: unknown): v is EmojiId => EMOJIS.some((e) => e.id === v);
 const isEmoteId = (v: unknown): v is EmoteId => EMOTES.some((e) => e.id === v);
+const isPlayerEmoteId = (v: unknown): v is EmoteId => PLAYER_EMOTES.some((e) => e.id === v);
 
 /** Removes control characters, collapses whitespace and truncates. Empty string = nothing to send. */
 function sanitizeMessage(raw: unknown, max = MAX_MESSAGE_LENGTH): string {
@@ -1757,6 +1770,8 @@ interface PlayerSnapshot {
   held: number; tool: ToolKind;
   /** Incremented on every place/remove so others can play the arm swing. */
   action: number;
+  /** Sitting on the ground / lying down (until the character moves). */
+  pose?: RestPose;
 }
 
 /** Rarely-changing player data, sent on join and when it changes. */
@@ -1781,6 +1796,8 @@ interface ClientMessages {
   mgLeave: Record<string, never>;
   mgSpectate: { gameId: string };
   rename: { name: string };
+  /** Sit down / lie down / stand up. */
+  pose: { pose: RestPose };
   /** Play with a Game Center character. */
   mgNpc: { npcId: string };
   /** Pet / interact with an animal. */
@@ -1898,6 +1915,10 @@ type JoinAuth = Awaited<ReturnType<typeof authorizeJoin>>;
 type Phase = 'playing' | 'finished';
 
 interface Player {
+  /** Sitting on the ground / lying down until moving (and where it started). */
+  pose: RestPose;
+  poseX: number;
+  poseZ: number;
   sessionId: string;
   userId: string;
   username: string;
@@ -1915,7 +1936,7 @@ interface Player {
 
 /** Messages per second per player. "move" is sent at 15 Hz by the client. */
 const RATE_LIMITS: Record<string, number> = {
-  rename: 1, pet: 3, mgNpc: 2, mgInvite: 2, mgCancel: 2, mgAccept: 2, mgStart: 2, mgMove: 6, mgLeave: 2, mgSpectate: 2,
+  rename: 1, pose: 3, pet: 3, mgNpc: 2, mgInvite: 2, mgCancel: 2, mgAccept: 2, mgStart: 2, mgMove: 6, mgLeave: 2, mgSpectate: 2,
   move: 20, place: 12, remove: 12, hotbar: 10, buy: 5, appearance: 2, restore: 1, chat: 2, emoji: 2, emote: 1,
 };
 const STATE_INTERVAL_MS = 100;
@@ -1961,6 +1982,7 @@ interface HubDeps {
   settings: () => BlocksySettings;
   send: (sessionId: string, type: string, msg: unknown) => void;
   npcs: () => GameCenterNpc[];
+  emote: (id: string, emote: EmoteId) => void;
 }
 
 const INVITE_TTL_MS = 3 * 60_000;
@@ -2286,6 +2308,7 @@ class MiniGameHub {
     const seat = this.turnSeat(s);
     if (seat < 0 || !isBotId(s.seats[seat])) return;
     const ver = s.ver;
+    if (!s.ludo && Math.random() < 0.6) this.d.emote(s.seats[seat], 'think');   // hand on chin
     s.botTimers.push(this.d.clock.setTimeout(() => {
       if (s.phase !== 'playing' || s.ver !== ver || this.turnSeat(s) !== seat) return;
       if (s.ttt) this.applyMove(s, seat, tttBotMove(s.ttt, seat));
@@ -2298,6 +2321,7 @@ class MiniGameHub {
     if (s.phase === 'over') return;
     s.phase = 'over';
     s.result = { winners, reason };
+    for (const w of winners) this.d.emote(w, 'cheer');
     this.arm(s, RESULT_HOLD_MS, () => this.close(s));
     this.push(s);
     console.log(`[blocksy] ${s.kind} over (${reason}): ${winners.map((w) => this.d.players.get(w)?.username ?? w).join(', ') || 'draw'}`);
@@ -2434,7 +2458,7 @@ type BotTask =
   | { type: 'watch'; gameId: string; until: number }
   | { type: 'talk'; with: string; until: number; replyAt: number; line: number; replied: boolean }
   | { type: 'pet'; animalId: string; until: number };
-interface AmbientBot extends Walker { name: string; appearance: Appearance; task: BotTask; nextSocial: number; nextTalk: number; nextWatch: number; nextPet: number }
+interface AmbientBot extends Walker { pose: RestPose; name: string; appearance: Appearance; task: BotTask; nextSocial: number; nextTalk: number; nextWatch: number; nextPet: number }
 interface Animal extends Walker {
   kind: AnimalKind;
   variant: string;
@@ -2536,7 +2560,7 @@ class AmbientLife {
       const [x, z] = rnd();
       const id = `bot:w${i}`;
       this.bots.push({
-        id, name: `🤖 ${BOT_NAMES[i % BOT_NAMES.length]}`, appearance: randomAppearanceFor(id),
+        id, pose: '', name: `🤖 ${BOT_NAMES[i % BOT_NAMES.length]}`, appearance: randomAppearanceFor(id),
         x: x + 0.5, y: this.walk.get(`${x},${z}`)!, z: z + 0.5, yaw: Math.random() * 6.28, tx: x + 0.5, tz: z + 0.5,
         moving: false, waitUntil: 0, speed: 1.6, task: { type: 'wander' }, nextPet: Date.now() + 20000 + Math.random() * 30000,
         nextSocial: Date.now() + 4000 + Math.random() * 8000, nextTalk: Date.now() + 6000 + Math.random() * 10000, nextWatch: Date.now() + 15000 + Math.random() * 20000,
@@ -2585,6 +2609,8 @@ class AmbientLife {
   private dayChange(night: boolean): void {
     const b = this.bots[Math.floor(Math.random() * this.bots.length)];
     if (b) this.say('chat', b.id, night ? 'Good night! 🌙' : 'Good morning! ☀️');
+    // Morning: sleepers get up with a yawn.
+    if (!night) for (const x of this.bots) if (x.pose === 'sleep') { x.pose = ''; x.waitUntil = Date.now() + 2500; this.say('emote', x.id, 'yawn'); }
     if (!night) for (const a of this.animals) if (a.kind === 'rooster') this.onPet(a.id, '', a.kind);
   }
 
@@ -2664,7 +2690,14 @@ class AmbientLife {
     // Seated in a game (or waiting at a Ludo table): the body sits where the game put it.
     const seat = this.hub.seatSpot(b.id);
     if (seat) { b.x = seat.x; b.z = seat.z; b.y = seat.y; b.yaw = seat.yaw; b.moving = false; b.task = { type: 'wander' }; b.speed = 1.6; return; }
-    if (this.hub.busy(b.id)) { b.moving = false; return; }
+    if (this.hub.busy(b.id)) { b.moving = false; b.pose = ''; return; }
+    if (b.task.type !== 'wander' && b.task.type !== 'talk') b.pose = '';   // on the way somewhere: standing
+    // Night: free bots lie down and sleep until morning (they still come to play an unanswered invite).
+    if (this.night && b.task.type === 'wander') {
+      if (b.pose !== 'sleep') { b.pose = 'sleep'; b.moving = false; }
+      return;
+    }
+    if (!this.night && b.pose === 'sleep') b.pose = '';
 
     const task = b.task;
     if (task.type === 'join') {
@@ -2696,7 +2729,7 @@ class AmbientLife {
     if (task.type === 'pet') {
       const a = this.animals.find((x) => x.id === task.animalId);
       if (!a || now > task.until) { this.toWander(b); return; }
-      if (Math.hypot(a.x - b.x, a.z - b.z) < 2) { b.moving = false; this.pet(b.id, a.id); this.toWander(b); return; }
+      if (Math.hypot(a.x - b.x, a.z - b.z) < 2) { b.moving = false; b.yaw = Math.atan2(a.x - b.x, a.z - b.z); this.pet(b.id, a.id); this.say('emote', b.id, 'pet'); this.toWander(b); return; }
       b.tx = a.x; b.tz = a.z; b.moving = true;
       this.step(b, dt, false, () => undefined);
       if (!b.moving) this.toWander(b);
@@ -2747,8 +2780,12 @@ class AmbientLife {
       else if (r < 0.65) this.say('emote', b.id, ['happy', 'wave', 'happy'][Math.floor(Math.random() * 3)]);
       else this.say('chat', b.id, SOLO_LINES[Math.floor(Math.random() * SOLO_LINES.length)]);
     }
-    if (!b.moving && now >= b.waitUntil) this.pickTarget(b, 10);
-    this.step(b, dt, false, () => { b.waitUntil = now + 2000 + Math.random() * 5000; });
+    if (!b.moving && now >= b.waitUntil) { b.pose = ''; this.pickTarget(b, 10); }
+    this.step(b, dt, false, () => {
+      // Arrived: look around for a moment, or sit down on the ground for a while.
+      if (Math.random() < 0.3) { b.pose = 'sit'; b.waitUntil = now + 8000 + Math.random() * 12000; }
+      else b.waitUntil = now + 2000 + Math.random() * 5000;
+    });
   }
 
   private toWander(b: AmbientBot): void {
@@ -2841,12 +2878,16 @@ export default class BlocksyRoom extends Room {
       settings: () => this.settings,
       send: (id, type, msg) => { for (const c of this.clients) if (c.sessionId === id) c.send(type, msg); },
       npcs: () => this.layout.gameCenter.npcs,
+      emote: (id, emote) => this.broadcast('emote', { sessionId: id, id: emote }),
     });
     this.life = new AmbientLife(this.grid, this.layout, this.settings, this.hub, this.players, (type, id, value) => {
       if (type === 'chat') this.broadcast('chat', { sessionId: id, text: value });
       else if (type === 'emoji') this.broadcast('emoji', { sessionId: id, id: value });
       else if (!this.hub.playing(id)) this.broadcast('emote', { sessionId: id, id: value });
-    }, (animalId, byId, kind) => this.broadcast('animal', { id: animalId, by: byId, kind }));
+    }, (animalId, byId, kind) => {
+      this.broadcast('animal', { id: animalId, by: byId, kind });
+      if (byId) { const p = this.players.get(byId); if (p) p.pose = ''; this.broadcast('emote', { sessionId: byId, id: 'pet' }); }
+    });
     // The session timer starts after the first join, once the match config is known (see startSessionTimer).
 
     this.onMessage('move', (c: Client, m: ClientMessages['move']) => { if (this.guard(c, 'move')) this.handleMove(c, m); });
@@ -2861,7 +2902,7 @@ export default class BlocksyRoom extends Room {
       if (this.guard(c, 'emoji') && isEmojiId(m?.id)) this.broadcast('emoji', { sessionId: c.sessionId, id: m.id });
     });
     this.onMessage('emote', (c: Client, m: ClientMessages['emote']) => {
-      if (this.guard(c, 'emote') && isEmoteId(m?.id) && !this.hub.playing(c.sessionId)) this.broadcast('emote', { sessionId: c.sessionId, id: m.id });
+      if (this.guard(c, 'emote') && isPlayerEmoteId(m?.id) && !this.hub.playing(c.sessionId)) { const p = this.players.get(c.sessionId); if (p) p.pose = ''; this.broadcast('emote', { sessionId: c.sessionId, id: m.id }); }
     });
     this.onMessage('rename', (c: Client, m: { name?: unknown }) => {
       const p = this.players.get(c.sessionId);
@@ -2871,6 +2912,11 @@ export default class BlocksyRoom extends Room {
     });
     this.onMessage('mgInvite', (c: Client, m: { kind?: unknown }) => {
       if (this.guard(c, 'mgInvite') && isObj(m) && isMiniGameKind(m.kind)) this.hub.invite(c.sessionId, m.kind);
+    });
+    this.onMessage('pose', (c: Client, m: { pose?: unknown }) => {
+      const p = this.players.get(c.sessionId);
+      if (!p || !this.guard(c, 'pose') || !isObj(m) || !isRestPose(m.pose) || this.hub.locked(c.sessionId)) return;
+      p.pose = m.pose; p.poseX = p.x; p.poseZ = p.z;
     });
     this.onMessage('pet', (c: Client, m: { animalId?: unknown }) => {
       if (!this.guard(c, 'pet') || !isObj(m) || typeof m.animalId !== 'string' || this.hub.locked(c.sessionId)) return;
@@ -2929,6 +2975,7 @@ export default class BlocksyRoom extends Room {
     const i = this.players.size, a = (i / MAX_PLAYERS) * Math.PI * 2, s = this.layout.spawn;
     const spawn = { ...s, x: s.x + Math.cos(a) * (i ? 1.5 : 0), z: s.z + Math.sin(a) * (i ? 1.5 : 0) };
     const p: Player = {
+      pose: '', poseX: 0, poseZ: 0,
       sessionId: client.sessionId, userId: auth.userId,
       username: sanitizeUsername(options?.username), avatarUrl: sanitizeAvatarUrl(options?.avatarUrl),
       connected: true, appearance: profile.appearance, profile, restored: false, placed: 0,
@@ -3077,7 +3124,7 @@ export default class BlocksyRoom extends Room {
       players.push({
         id: p.sessionId, userId: p.userId, username: p.username, avatarUrl: p.avatarUrl,
         x: round3(p.x), y: round3(p.y), z: round3(p.z), yaw: round3(p.yaw), speed: round3(p.speed),
-        grounded: p.grounded, held: p.held, tool: p.tool, action: p.action,
+        grounded: p.grounded, held: p.held, tool: p.tool, action: p.action, pose: p.pose,
         ...this.hub.tags(p.sessionId),
       });
     }
@@ -3085,7 +3132,7 @@ export default class BlocksyRoom extends Room {
       players.push({
         id: b.id, userId: '', username: b.name, avatarUrl: '',
         x: round3(b.x), y: round3(b.y), z: round3(b.z), yaw: round3(b.yaw), speed: b.moving ? round3(b.speed / 4.3) : 0,
-        grounded: true, held: AIR, tool: 'none', action: 0, ...this.hub.tags(b.id),
+        grounded: true, held: AIR, tool: 'none', action: 0, pose: b.pose, ...this.hub.tags(b.id),
       });
     }
     const animals = this.life.animals.map((a) => ({ id: a.id, kind: a.kind, variant: a.variant, x: round3(a.x), y: round3(a.y), z: round3(a.z), yaw: round3(a.yaw), moving: a.moving }));
@@ -3121,6 +3168,7 @@ export default class BlocksyRoom extends Room {
       return;
     }
     p.x = Math.max(-50, Math.min(WORLD_SIZE.x + 50, m.x));
+    if (p.pose && Math.hypot(m.x - p.poseX, m.z - p.poseZ) > 0.4) p.pose = '';   // walked away: stand up
     p.y = Math.max(-50, Math.min(200, m.y));
     p.z = Math.max(-50, Math.min(WORLD_SIZE.z + 50, m.z));
     p.yaw = m.yaw;

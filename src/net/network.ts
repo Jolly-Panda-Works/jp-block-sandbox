@@ -24,6 +24,8 @@ export interface RemoteState extends PlayerSnapshot {
   invReadyAt?: number;
   /** Mini-game session the player is in or watching. */
   mg?: string;
+  /** Sitting / lying down. */
+  pose?: '' | 'sit' | 'sleep';
 }
 type StatePlayer = PlayerSnapshot & { inv?: MiniGameKind | ''; invAgeMs?: number; mg?: string };
 export const remotes = new Map<string, RemoteState>();

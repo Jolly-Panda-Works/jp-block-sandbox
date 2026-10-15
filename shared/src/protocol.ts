@@ -3,6 +3,7 @@ import type { ProfileData, PurchaseResult, ToolKind } from './economy';
 import type { IslandLayout } from './island';
 import type { EmojiId, EmoteId } from './social';
 import type { PlacementResult, RemovalResult } from './placement';
+import type { RestPose } from './social';
 import type { MiniGameKind, MiniGameMove } from './minigames';
 
 /**
@@ -29,6 +30,8 @@ export interface PlayerSnapshot {
   held: number; tool: ToolKind;
   /** Incremented on every place/remove so others can play the arm swing. */
   action: number;
+  /** Sitting on the ground / lying down (until the character moves). */
+  pose?: RestPose;
 }
 
 /** Rarely-changing player data, sent on join and when it changes. */
@@ -53,6 +56,8 @@ export interface ClientMessages {
   mgLeave: Record<string, never>;
   mgSpectate: { gameId: string };
   rename: { name: string };
+  /** Sit down / lie down / stand up. */
+  pose: { pose: RestPose };
   /** Play with a Game Center character. */
   mgNpc: { npcId: string };
   /** Pet / interact with an animal. */

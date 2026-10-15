@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { AIR, createRng, hashString, isBotId, miniGameInfo, randomAppearance, type IslandLayout, type MgListing, type MiniGameKind } from '@jp/blocksy-shared';
 import { Avatar } from './Avatar';
 import { applyGamePose, getAnim, now, playEmote } from './animState';
-import { footstep, land } from './particleFx';
+import { footstep, land, notes } from './particleFx';
 import { remotes } from '../net/network';
 import { useGame, type PlayerMeta } from '../state/store';
 import { localBody } from '../game/localState';
@@ -39,7 +39,7 @@ function RemotePlayer({ id, meta }: { id: string; meta: PlayerMeta }) {
   const [held, setHeld] = useState(AIR);
   const [hammer, setHammer] = useState(false);
   const [invite, setInvite] = useState<MiniGameKind | ''>('');
-  const fxs = useRef({ grounded: true, airTime: 0, step: 0 });
+  const fxs = useRef({ grounded: true, airTime: 0, step: 0, px: 0, pz: 0, sp: 0, init: false, zzz: 0 });
   useFrame((_, dt) => {
     const r = remotes.get(id), g = group.current;
     if (!r || !g) return;
@@ -50,15 +50,26 @@ function RemotePlayer({ id, meta }: { id: string; meta: PlayerMeta }) {
     r.ryaw += Math.atan2(Math.sin(r.yaw - r.ryaw), Math.cos(r.yaw - r.ryaw)) * k;
     g.position.set(r.rx, r.ry, r.rz);
     g.rotation.set(0, r.ryaw, 0);
-    anim.speed = r.speed; anim.grounded = r.grounded;
     const f = fxs.current;
+    // Walk animation from the movement actually shown on screen (the position is smoothed toward the
+    // server's), not from the server's speed value: legs and body stay in step, also while catching up.
+    const moved = f.init ? Math.hypot(r.rx - f.px, r.rz - f.pz) : 0;
+    f.px = r.rx; f.pz = r.rz; f.init = true;
+    const shown = dt > 0 && moved < 3 ? moved / dt : 0;
+    f.sp += (shown - f.sp) * (1 - Math.exp(-12 * dt));
+    anim.speed = f.sp / 4.3; anim.grounded = r.grounded;
+    anim.restPose = r.pose === 'sit' || r.pose === 'sleep' ? r.pose : 'none';
+    if (anim.restPose === 'sleep' && now() > f.zzz && Math.hypot(r.rx - localBody.x, r.rz - localBody.z) < 25) {
+      f.zzz = now() + 2.2;
+      notes(r.rx, r.ry + 0.6, r.rz, '#cfe3ff');                   // 💤
+    }
     if (Math.hypot(r.rx - localBody.x, r.rz - localBody.z) < 30) {
       if (!r.grounded) f.airTime += dt;
       else if (!f.grounded && f.airTime > 0.45) land(r.rx, r.ry, r.rz, Math.min(1, (f.airTime - 0.45) * 1.2));
       if (r.grounded) f.airTime = 0;
-      if (r.grounded && r.speed > 0.3) {
-        f.step += r.speed * 4.3 * dt;
-        if (f.step > (r.speed > 1.15 ? 0.75 : 1.1)) { f.step = 0; footstep(r.rx, r.ry, r.rz, r.speed > 1.15 ? 1.6 : 0.8); }
+      if (r.grounded && f.sp > 1.2) {
+        f.step += f.sp * dt;
+        if (f.step > (f.sp > 5 ? 0.75 : 1.1)) { f.step = 0; footstep(r.rx, r.ry, r.rz, f.sp > 5 ? 1.6 : 0.8); }
       }
     }
     f.grounded = r.grounded;

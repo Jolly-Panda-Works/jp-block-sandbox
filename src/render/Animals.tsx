@@ -6,6 +6,11 @@ import { isAnimalKind, variantColors, type AnimalColors, type AnimalKind } from 
 import { useGame } from '../state/store';
 import { animalStates } from '../net/network';
 import { now } from './animState';
+import { isNight } from '@jp/blocksy-shared';
+import { currentClock } from '../net/network';
+
+/** Animals that lower their head to graze now and then while standing still. */
+const GRAZERS = new Set(['cow', 'sheep', 'llama', 'pig', 'rabbit', 'panda', 'chicken', 'chick', 'duck']);
 import { footstep } from './particleFx';
 import { localBody } from '../game/localState';
 
@@ -141,6 +146,7 @@ function Animal({ id, kind, variant }: { id: string; kind: AnimalKind; variant: 
   const wings = useRef<(THREE.Mesh | null)[]>([]);
   const phase = useRef(Math.random() * 6);
   const step = useRef(0);
+  const gait = useRef({ px: 0, pz: 0, sp: 0, init: false, graze: Math.random() * 20 });
   const model = MODELS[kind];
   const pal = variantColors(kind, variant);
   const fly = kind === 'bee', hopper = kind === 'rabbit';
@@ -153,19 +159,32 @@ function Animal({ id, kind, variant }: { id: string; kind: AnimalKind; variant: 
     a.ryaw += Math.atan2(Math.sin(a.yaw - a.ryaw), Math.cos(a.yaw - a.ryaw)) * k;
     grp.position.set(a.rx, a.ry, a.rz);
     grp.rotation.y = a.ryaw;
-    if (a.moving) phase.current += dt * (kind === 'cat' || kind === 'dog' || kind === 'fox' ? 14 : 8);
-    if (a.moving && DUSTY.has(kind) && Math.hypot(a.rx - localBody.x, a.rz - localBody.z) < 25) {
+    // Legs move with the speed you actually see (smoothed position), one step per leg length.
+    const gs = gait.current;
+    const moved = gs.init ? Math.hypot(a.rx - gs.px, a.rz - gs.pz) : 0;
+    gs.px = a.rx; gs.pz = a.rz; gs.init = true;
+    gs.sp += ((dt > 0 && moved < 3 ? moved / dt : 0) - gs.sp) * (1 - Math.exp(-12 * dt));
+    const walking = gs.sp > 0.08;
+    const strideLen = Math.max(0.12, model.legTop * 1.3);
+    if (walking) phase.current += ((Math.PI * gs.sp) / strideLen) * dt;
+    if (walking && DUSTY.has(kind) && Math.hypot(a.rx - localBody.x, a.rz - localBody.z) < 25) {
       step.current += dt;
       if (step.current > 0.55) { step.current = 0; footstep(a.rx, a.ry, a.rz, kind === 'cow' || kind === 'llama' || kind === 'panda' ? 1 : 0.5); }
     }
-    const swing = a.moving ? Math.sin(phase.current) * 0.55 : 0;
+    const swing = walking ? Math.sin(phase.current) * 0.55 : 0;
+    // Night: most animals lie down (legs tucked under). Day: grazers lower their head now and then.
+    const asleep = !walking && !fly && kind !== 'duck' && isNight(currentClock().hour);
+    const grazing = !walking && !asleep && GRAZERS.has(kind) && Math.sin(t * 0.35 + gs.graze) > 0.55;
+    legs.current.forEach((l) => { if (l) l.visible = !asleep; });
+    if (body.current) body.current.rotation.x += ((grazing ? 0.22 : 0) - body.current.rotation.x) * (1 - Math.exp(-4 * dt));
     legs.current.forEach((l, i) => { if (l) l.rotation.x = i % 2 === 0 ? swing : -swing; });
     const flap = fly ? Math.sin(t * 60) * 0.6 : Math.max(0, Math.sin(t * 18)) * 0.5 * (t - (a.hopAt ?? -9) < 0.8 ? 1 : 0);
     wings.current.forEach((w, i) => { if (w) w.rotation.z = i % 2 === 0 ? flap : -flap; });
     // Pet reaction: two little hops. Rabbits hop while walking; bees bob in the air.
     const since = t - (a.hopAt ?? -9);
     let y = since < 0.8 ? Math.abs(Math.sin((since / 0.4) * Math.PI)) * 0.25 : 0;
-    if (hopper && a.moving) y += Math.abs(Math.sin(phase.current)) * 0.15;
+    if (hopper && walking) y += Math.abs(Math.sin(phase.current)) * 0.15;
+    if (asleep) y -= model.legTop * 0.85;
     if (fly) y += Math.sin(t * 2 + phase.current) * 0.12;
     if (body.current) body.current.position.y = y;
   });

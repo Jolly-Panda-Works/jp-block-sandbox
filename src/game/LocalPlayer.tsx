@@ -209,6 +209,8 @@ export function LocalPlayer() {
     if (game.mg?.role === 'player' && game.mg.seatYaw !== undefined) targetYaw = game.mg.seatYaw; // face the table / opponent
     const diff = Math.atan2(Math.sin(targetYaw - s.bodyYaw), Math.cos(targetYaw - s.bodyYaw));
     s.bodyYaw += fp ? diff : clamp(diff, -12 * dt, 12 * dt);
+    if (game.myPose && (Math.abs(inp.moveX) + Math.abs(inp.moveY) > 0.1 || !b.grounded)) useGame.setState({ myPose: '' }); // moving stands up
+    anim.restPose = game.myPose || 'none';
     anim.speed = hs / WALK;
     anim.grounded = b.grounded;
     anim.holding = game.tool !== 'none' && !inMg;

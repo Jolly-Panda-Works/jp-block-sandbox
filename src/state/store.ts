@@ -64,6 +64,8 @@ interface GameState {
   particles: boolean;
   /** Third-person camera distance from the player in metres (2–8, saved on this device). */
   camDistance: number;
+  /** My resting pose (sit on the ground / lie down); moving stands up. */
+  myPose: '' | 'sit' | 'sleep';
   invertY: boolean;
 
   setPanel: (p: Panel) => void;
@@ -126,6 +128,7 @@ export const useGame = create<GameState>()((set, get) => ({
   toast: null,
   nearbyStall: null,
   sensitivity: 1,
+  myPose: '',
   camDistance: (() => { try { const v = Number(localStorage.getItem('blocksy.camDistance')); return v >= 2 && v <= 8 ? v : 4; } catch { return 4; } })(),
   particles: (() => { try { return localStorage.getItem('blocksy.particles') !== 'off'; } catch { return true; } })(),
   invertY: false,
