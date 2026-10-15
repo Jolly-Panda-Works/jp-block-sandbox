@@ -68,7 +68,7 @@ export function LocalPlayer() {
     if (!g) return;
     const dt = Math.min(rawDt, 0.05), t = now(), s = st.current, b = localBody;
     const game = useGame.getState();
-    const active = game.panel === 'none' && game.pointerLocked;
+    const active = game.panel === 'none' && (game.pointerLocked || game.touch);
     const inp = consumeInput();
 
     // ---- look (mouse delta is per frame: never multiplied by dt) ----

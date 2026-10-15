@@ -83,6 +83,23 @@ Logo assets live in `client/public/`:
 
 All files are transparent PNGs. The internal workspace package names (`@jp/block-sandbox-*`) are unchanged to avoid breaking installs.
 
+## Touch controls (small screens)
+
+When the window is at most 900 px wide or 520 px tall (phones, tablets, narrow windows), the game switches to touch mode automatically:
+
+| Control | What it does |
+|---|---|
+| Joystick (bottom-left) | Move |
+| Drag on free screen | Look |
+| ⬆ Jump | Jump |
+| Use button | Place the held block, or Remove with the hammer. With empty hands it opens the build menu. |
+| Tap a hotbar slot | Choose a block, or 0 for the hammer. Tap again to put it away. |
+| 🎥 | First / third person |
+| 🛒 | Appears next to a stall and opens its shop |
+| Top buttons | Build, Social, Style, Shop, Menu |
+
+In touch mode the keyboard is ignored and the cursor is never captured. Text fields, such as chat and your name, still accept typing. To test on desktop, narrow the window or use the browser's device toolbar.
+
 ## Project structure
 
 ```
@@ -111,6 +128,10 @@ docs/     ARCHITECTURE.md, TESTING.md
 ```
 
 The project uses the scoped namespace `@jp/...` for all packages (the JP root namespace).
+
+## Troubleshooting
+
+`Cannot find package '@jp/block-sandbox-shared'` means the npm workspace link is broken, which happens after moving or copying the folder. The server (tsconfig `paths`, used by tsx) and the client (Vite `resolve.alias`) both resolve the shared package from `../shared/src` directly, so this shouldn't happen anymore. If it does, run `npm install` again in the project root.
 
 ## Known limitations
 

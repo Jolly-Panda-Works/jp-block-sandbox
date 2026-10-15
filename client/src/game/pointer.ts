@@ -12,6 +12,7 @@ export function takeSuppressPause(): boolean {
 
 /** Requests pointer lock on the game canvas (must run inside a user gesture). */
 export function lockPointer(): void {
+  if (useGame.getState().touch) return; // touch mode never captures the pointer
   const c = document.querySelector<HTMLCanvasElement>('.game canvas, canvas.game');
   if (!c || document.pointerLockElement === c) return;
   try {

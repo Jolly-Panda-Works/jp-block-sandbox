@@ -8,7 +8,7 @@ import { CustomizePanel } from './ui/CustomizePanel';
 import { SocialPanel } from './ui/SocialPanel';
 import { BuildPanel } from './ui/BuildPanel';
 import { PauseMenu } from './ui/PauseMenu';
-import { clearHeld, installInput } from './game/input';
+import { clearHeld, installInput, setKeyboardEnabled } from './game/input';
 import { lockPointer, openPanel, takeSuppressPause, togglePanel } from './game/pointer';
 import { useGame } from './state/store';
 
@@ -32,9 +32,27 @@ function onKey(code: string): void {
   else if (code === 'KeyQ' && s.tool !== 'none') s.setTool('none'); // put away
 }
 
+/** Small screens (phones, tablets, narrow windows) switch to touch controls and disable the keyboard. */
+const SMALL_SCREEN = '(max-width: 900px), (max-height: 520px)';
+
 export function App() {
   const phase = useGame((s) => s.phase);
   const panel = useGame((s) => s.panel);
+  const isTouch = useGame((s) => s.touch);
+
+  useEffect(() => {
+    const mq = window.matchMedia(SMALL_SCREEN);
+    const apply = () => {
+      const t = mq.matches;
+      useGame.setState({ touch: t });
+      setKeyboardEnabled(!t);
+      clearHeld();
+      if (t && document.pointerLockElement) document.exitPointerLock();
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
 
   useEffect(() => installInput(onKey), []);
   useEffect(() => {
@@ -46,7 +64,7 @@ export function App() {
       clearHeld();
       const s = useGame.getState();
       // Losing the lock without opening a panel means the player pressed Escape: show the pause menu.
-      if (!suppressed && s.phase === 'playing' && s.panel === 'none') s.setPanel('pause');
+      if (!suppressed && !s.touch && s.phase === 'playing' && s.panel === 'none') s.setPanel('pause');
     };
     document.addEventListener('pointerlockchange', change);
     return () => document.removeEventListener('pointerlockchange', change);
@@ -55,7 +73,7 @@ export function App() {
   if (phase !== 'playing') return <JoinScreen />;
 
   return (
-    <div className="app">
+    <div className={`app ${isTouch ? 'touch' : ''}`}>
       <Canvas className="game" shadows flat dpr={[1, 2]} camera={{ fov: 72, near: 0.05, far: 600 }} gl={{ antialias: true }}
         onPointerDown={() => { if (useGame.getState().panel === 'none') lockPointer(); }}>
         <Scene />

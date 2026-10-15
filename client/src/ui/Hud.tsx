@@ -4,6 +4,7 @@ import { useGame } from '../state/store';
 import { getIconUrl } from '../render/textures';
 import { now } from '../render/animState';
 import { lockPointer, togglePanel } from '../game/pointer';
+import { TouchControls } from './TouchControls';
 
 export function Keycap({ k }: { k: string }) { return <span className="keycap">{k}</span>; }
 
@@ -14,6 +15,7 @@ export function Hud() {
   const playing = s.panel === 'none';
   return (
     <div className="hud">
+      {s.touch && playing && <TouchControls />}
       <div className="card island">
         <img className="badge" src="/blocksy-icon.png" alt="Blocksy" />
         <div><div className="title">{ISLAND_NAME}</div><div className="sub">👥 {count} / {MAX_PLAYERS} players</div></div>
@@ -26,11 +28,12 @@ export function Hud() {
         <button onClick={() => togglePanel('pause')}>⚙️</button>
       </div>
       {playing && s.pointerLocked && <div className="crosshair" />}
-      {playing && !s.pointerLocked && <div className="click-to-play" onClick={lockPointer}>Click to play</div>}
-      {s.nearbyStall && playing && <div className="card prompt"><Keycap k="E" /> Open {s.nearbyStall.title} shop</div>}
+      {playing && s.touch && <div className="crosshair" />}
+      {playing && !s.touch && !s.pointerLocked && <div className="click-to-play" onClick={lockPointer}>Click to play</div>}
+      {s.nearbyStall && playing && !s.touch && <div className="card prompt"><Keycap k="E" /> Open {s.nearbyStall.title} shop</div>}
       <SelfBubble />
       <Toast />
-      {s.showHints && (
+      {s.showHints && !s.touch && (
         <div className="card hints">
           <span><Keycap k="W" /><Keycap k="A" /><Keycap k="S" /><Keycap k="D" /> Move</span>
           <span><Keycap k="Space" /> Jump</span>
@@ -43,8 +46,8 @@ export function Hud() {
           <span><Keycap k="H" /> Hide</span>
         </div>
       )}
-      <div className="card mode"><Keycap k="V" /> {s.cameraMode === 'first' ? 'First person' : 'Third person'}</div>
-      {s.tool === 'none' && playing && (
+      {!s.touch && <div className="card mode"><Keycap k="V" /> {s.cameraMode === 'first' ? 'First person' : 'Third person'}</div>}
+      {s.tool === 'none' && playing && !s.touch && (
         <div className="card hands">✋ Hands empty — <Keycap k="1–9" /> build · <Keycap k="0" /> destroy · <Keycap k="T" /> choose blocks</div>
       )}
       <div className={`card hotbar ${s.tool === 'none' ? 'idle' : ''}`}>

@@ -23,6 +23,8 @@ interface GameState {
   panel: Panel;
   shopTab: ShopCategory;
   pointerLocked: boolean;
+  /** Small screen: touch controls on, keyboard and pointer lock off. */
+  touch: boolean;
   cameraMode: CameraMode;
   showHints: boolean;
   players: Record<string, PlayerMeta>;
@@ -58,6 +60,7 @@ export const useGame = create<GameState>()((set, get) => ({
   panel: 'none',
   shopTab: 'blocks',
   pointerLocked: false,
+  touch: false,
   cameraMode: 'third',
   showHints: true,
   players: {},

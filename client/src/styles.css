@@ -152,3 +152,53 @@ input:focus { border-color: var(--accent); }
 .badge-slot { position: absolute; top: 6px; right: 8px; background: var(--accent); color: #08352c; border-radius: 6px; padding: 0 6px; font-size: 12px; }
 .empty-bag { display: flex; align-items: center; gap: 12px; color: var(--sub); background: var(--tile); padding: 14px; border-radius: 12px; }
 .active-tool { outline: 2px solid var(--accent); }
+
+/* ---------- Touch mode (small screens) ---------- */
+.app.touch, .app.touch * { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+.app.touch input { -webkit-user-select: text; user-select: text; }
+.look-area { position: absolute; inset: 0; pointer-events: auto; touch-action: none; }
+.joystick { position: absolute; left: max(22px, env(safe-area-inset-left)); bottom: 26px; width: 140px; height: 140px; border-radius: 50%;
+  background: rgba(20, 26, 34, 0.35); border: 3px solid rgba(255, 255, 255, 0.55); pointer-events: auto; touch-action: none; display: grid; place-items: center; }
+.joystick .knob { width: 62px; height: 62px; border-radius: 50%; background: rgba(240, 244, 248, 0.85); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35); pointer-events: none; }
+.touch-buttons { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: 22px; display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto;
+  gap: 12px; align-items: end; justify-items: center; pointer-events: none; }
+.touch-btn { pointer-events: auto; touch-action: none; width: 84px; height: 84px; border-radius: 22px; background: var(--panel); border: 3px solid rgba(255, 255, 255, 0.25);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 30px; padding: 0; }
+.touch-btn span { font-size: 13px; }
+.touch-btn img { width: 40px; height: 40px; image-rendering: pixelated; }
+.touch-btn:active { transform: scale(0.94); }
+.touch-btn.small { width: 62px; height: 62px; font-size: 22px; border-radius: 18px; }
+.touch-btn.small span { font-size: 11px; }
+.touch-btn.use.block { background: var(--accent); color: #08352c; border-color: #8ff5df; }
+.touch-btn.use.destroy { border-color: #ff7a59; }
+.touch-btn.jump { grid-column: 2; }
+.touch-btn.use { grid-column: 1; }
+
+@media (max-width: 900px), (max-height: 520px) {
+  .island { top: 10px; left: 10px; padding: 6px 12px 6px 6px; gap: 8px; }
+  .island .badge { width: 34px; height: 34px; }
+  .island .title { font-size: 15px; }
+  .island .sub { font-size: 11px; }
+  .top-buttons { top: 10px; right: 10px; gap: 6px; }
+  .top-buttons button { padding: 8px 10px; font-size: 13px; }
+  .top-buttons .keycap { display: none; }
+  .hotbar { bottom: 8px; gap: 4px; padding: 6px; max-width: calc(100vw - 420px); overflow-x: auto; }
+  .slot { width: 42px; height: 46px; }
+  .slot img, .slot .tool-icon, .slot:not(:has(img))::before { width: 38px; height: 38px; font-size: 20px; border-width: 2px; }
+  .slot .name { display: none; }
+  .slot .num { top: 2px; left: 4px; font-size: 10px; }
+  .toast { font-size: 15px; white-space: normal; text-align: center; width: 80vw; }
+  .panel { padding: 12px; max-height: 94vh; }
+  .customize-body { flex-direction: column; }
+  .preview { flex: 0 0 200px; height: 200px; }
+  .row { grid-template-columns: 60px 1fr; }
+  .swatches { grid-column: 1 / -1; }
+  .build-slots { grid-template-columns: repeat(5, 1fr); }
+  .social { width: min(470px, 96vw); }
+  .hint.inline { display: none; }
+}
+@media (max-width: 600px) {
+  .top-buttons button { font-size: 0; padding: 8px; }
+  .top-buttons button::first-letter { font-size: 18px; }
+  .hotbar { max-width: calc(100vw - 24px); bottom: 180px; }
+}
