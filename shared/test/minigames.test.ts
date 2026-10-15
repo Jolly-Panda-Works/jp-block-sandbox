@@ -92,3 +92,34 @@ test('ludo: track geometry, leaving base, capture, safe squares, exact finish, w
   let l = ludoNew(3); l = ludoLeave(l, 0);
   assert.equal(l.turn, 1); assert.deepEqual(ludoActive(l), [1, 2]);
 });
+
+import { tttBotMove, chessBotMove, ludoBotAction, rpsBotPick, isBotId, createWorldGrid, generateIsland, getBlock } from '../src/index';
+
+test('bots: tic tac toe wins/blocks, chess grabs a free queen, ludo captures, ids', () => {
+  const noRandom = () => 0.5;
+  assert.equal(tttBotMove({ cells: [0, 0, -1, 1, 1, -1, -1, -1, -1], turn: 1 }, 1, noRandom), 5, 'wins');
+  assert.equal(tttBotMove({ cells: [0, 0, -1, 1, -1, -1, -1, -1, -1], turn: 1 }, 1, noRandom), 2, 'blocks');
+  const c = chessNew();
+  c.board = new Array(64).fill(''); c.board[sq('e1')] = 'K'; c.board[sq('h8')] = 'k'; c.board[sq('d1')] = 'R'; c.board[sq('d7')] = 'q'; c.castling = '';
+  const m = chessBotMove(c, () => 0)!;
+  assert.deepEqual([m.from, m.to], [sq('d1'), sq('d7')], 'takes the undefended queen');
+  let l = ludoNew(2); l.tokens[0] = [10, 20, -1, -1]; l.tokens[1][0] = 26; l.dice = 4; l.phase = 'move';
+  // red token at 20 + 4 = 24 → absolute 24; yellow at relative 26 → absolute (26+26)%52 = 0 … place yellow on 24 instead
+  l.tokens[1][0] = (24 - 26 + 52) % 52;
+  assert.deepEqual(ludoBotAction(l, () => 0), { type: 'move', token: 1 }, 'captures');
+  assert.deepEqual(ludoBotAction({ ...l, phase: 'roll' }), { type: 'roll' });
+  assert.ok(['rock', 'paper', 'scissors'].includes(rpsBotPick()));
+  assert.ok(isBotId('bot:1') && isBotId('npc:chess') && !isBotId('abc'));
+});
+
+test('island: game center with four NPCs on a clear floor', () => {
+  const g = createWorldGrid();
+  const layout = generateIsland(g, 1337);
+  assert.equal(layout.gameCenter.npcs.length, 4);
+  for (const n of layout.gameCenter.npcs) {
+    const x = Math.floor(n.x), z = Math.floor(n.z);
+    assert.ok(getBlock(g.get(x, n.y - 1, z))?.solid, `${n.name} stands on the floor`);
+    assert.ok(!getBlock(g.get(x, n.y, z))?.solid && !getBlock(g.get(x, n.y + 1, z))?.solid, `${n.name} has room`);
+  }
+  assert.ok(layout.signs.some((s) => s.text === 'Game Center'));
+});

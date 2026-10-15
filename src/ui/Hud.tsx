@@ -19,6 +19,7 @@ export function interactMiniGame(): boolean {
     else send('mgAccept', { hostId: s.nearInvite.hostId });
     return true;
   }
+  if (s.nearNpc) { send('mgNpc', { npcId: s.nearNpc.id }); return true; }
   if (s.nearGame) { send('mgSpectate', { gameId: s.nearGame.id }); return true; }
   return false;
 }
@@ -72,12 +73,17 @@ export function Hud() {
           <Keycap k="E" /> {miniGameInfo(s.nearInvite.kind).icon} {s.nearInvite.waitMs > 0 ? `${miniGameInfo(s.nearInvite.kind).name} with ${s.nearInvite.name} — in ${Math.ceil(s.nearInvite.waitMs / 1000)} s` : `Play ${miniGameInfo(s.nearInvite.kind).name} with ${s.nearInvite.name}`}
         </button>
       )}
-      {playing && !s.mg && !s.nearInvite && s.nearGame && (
+      {playing && !s.mg && !s.nearInvite && s.nearNpc && (
+        <button className="card prompt mg-prompt" onClick={() => interactMiniGame()}>
+          <Keycap k="E" /> {miniGameInfo(s.nearNpc.kind).icon} Play {miniGameInfo(s.nearNpc.kind).name} with 🤖 {s.nearNpc.name}
+        </button>
+      )}
+      {playing && !s.mg && !s.nearInvite && !s.nearNpc && s.nearGame && (
         <button className="card prompt mg-prompt" onClick={() => interactMiniGame()}>
           <Keycap k="E" /> 👁 Watch {miniGameInfo(s.nearGame.kind).name}
         </button>
       )}
-      {s.nearbyStall && playing && !s.touch && !s.nearInvite && !s.nearGame && <div className="card prompt"><Keycap k="E" /> Open {s.nearbyStall.title} shop</div>}
+      {s.nearbyStall && playing && !s.touch && !s.nearInvite && !s.nearGame && !s.nearNpc && <div className="card prompt"><Keycap k="E" /> Open {s.nearbyStall.title} shop</div>}
       <SelfBubble />
       <Toast />
       {s.showHints && !s.touch && (

@@ -243,6 +243,7 @@ export function LocalPlayer() {
     // Nearest joinable invite and nearest running game (for the E prompt).
     let nearInvite: { hostId: string; name: string; kind: MiniGameKind; waitMs: number } | null = null;
     let nearGame: { id: string; kind: MiniGameKind } | null = null;
+    let nearNpc: { id: string; name: string; kind: MiniGameKind } | null = null;
     if (canAct) {
       let best = ACCEPT_RADIUS * ACCEPT_RADIUS;
       for (const [id, r] of remotes) {
@@ -252,6 +253,13 @@ export function LocalPlayer() {
         best = d;
         nearInvite = { hostId: id, name: game.players[id]?.name ?? 'Player', kind: r.inv, waitMs: Math.max(0, ((r.invReadyAt ?? 0) - t) * 1000) };
       }
+      const busy = new Set(game.games.flatMap((g) => g.seats.map((x) => x.id)));
+      let bestN = ACCEPT_RADIUS * ACCEPT_RADIUS;
+      for (const n of game.layout?.gameCenter?.npcs ?? []) {
+        if (busy.has(n.id)) continue;
+        const d = (n.x - b.x) ** 2 + (n.z - b.z) ** 2;
+        if (d <= bestN) { bestN = d; nearNpc = { id: n.id, name: n.name, kind: n.kind }; }
+      }
       let bestG = SPECTATE_RADIUS * SPECTATE_RADIUS;
       for (const g of game.games) {
         if (g.phase === 'over' || g.seats.some((x) => x.id === sessionId)) continue;
@@ -259,8 +267,8 @@ export function LocalPlayer() {
         if (d <= bestG) { bestG = d; nearGame = { id: g.id, kind: g.kind }; }
       }
     }
-    const nearKey = `${nearInvite?.hostId ?? ''}:${nearInvite ? Math.ceil(nearInvite.waitMs / 1000) : ''}|${nearGame?.id ?? ''}`;
-    if (nearKey !== s.nearKey) { s.nearKey = nearKey; useGame.setState({ nearInvite, nearGame }); }
+    const nearKey = `${nearInvite?.hostId ?? ''}:${nearInvite ? Math.ceil(nearInvite.waitMs / 1000) : ''}|${nearGame?.id ?? ''}|${nearNpc?.id ?? ''}`;
+    if (nearKey !== s.nearKey) { s.nearKey = nearKey; useGame.setState({ nearInvite, nearGame, nearNpc }); }
 
     if (t >= s.sendAt) {
       s.sendAt = t + SEND_INTERVAL;

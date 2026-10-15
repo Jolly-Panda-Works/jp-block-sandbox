@@ -3,6 +3,7 @@ import { SURFACE_Y, WATER_LEVEL, WORLD_SIZE } from './constants';
 import { BlockGrid } from './grid';
 import { createRng, randInt } from './rng';
 import type { ShopCategory } from './blocks';
+import type { GameCenterNpc, MiniGameKind } from './minigames';
 
 export interface Vec3 { x: number; y: number; z: number }
 export interface StallInfo {
@@ -22,6 +23,8 @@ export interface IslandLayout {
   stalls: StallInfo[];
   signs: SignInfo[];
   lanterns: [number, number, number][];
+  /** Fenced area with NPCs that play the popup mini-games. */
+  gameCenter: { x: number; y: number; z: number; npcs: GameCenterNpc[] };
 }
 
 export const createWorldGrid = (): BlockGrid => new BlockGrid(WORLD_SIZE.x, WORLD_SIZE.y, WORLD_SIZE.z);
@@ -50,7 +53,7 @@ export function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
   const layout: IslandLayout = {
     spawn: { x: CX + 0.5, y: S + 1, z: CZ - 15 + 0.5, yaw: 0 },
     center: { x: CX + 0.5, y: S + 1, z: CZ + 0.5 },
-    waterLevel: WATER_LEVEL, stalls: [], signs: [], lanterns: [],
+    waterLevel: WATER_LEVEL, stalls: [], signs: [], lanterns: [], gameCenter: { x: 0, y: 0, z: 0, npcs: [] },
   };
 
   const col = (x: number, z: number) => z * grid.sx + x;
@@ -180,6 +183,36 @@ export function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
   };
   sign(-14, -3, 'Build Here', 0);
   sign(-14, 1, 'Build Here', Math.PI);
+
+  // --- game center: stone floor, fence with a gate toward the plaza, lanterns, 4 NPC players ---
+  {
+    const x0 = 4, x1 = 12, z0 = 7, z1 = 15, cxg = 8, czg = 11;
+    for (let dx = x0; dx <= x1; dx++) for (let dz = z0; dz <= z1; dz++) {
+      if (!inIsland(dx, dz)) continue;
+      reserve(dx, dz);
+      for (let y = S + 1; y <= S + 5; y++) set(dx, y, dz, AIR);
+      set(dx, S, dz, B.bricks);
+      prot(dx, S, dz);
+      const edge = dx === x0 || dx === x1 || dz === z0 || dz === z1;
+      const gate = dx === x0 && dz >= czg - 1 && dz <= czg + 1;
+      if (edge && !gate) { set(dx, S + 1, dz, B.fence); prot(dx, S + 1, dz); }
+    }
+    for (const [dx, dz] of [[x0, z0], [x1, z0], [x0, z1], [x1, z1]]) {
+      set(dx, S + 2, dz, B.lantern); prot(dx, S + 2, dz);
+      layout.lanterns.push([CX + dx, S + 2, CZ + dz]);
+    }
+    sign(x0 - 1, czg + 2, 'Game Center', -Math.PI / 2);
+    const spots: [string, string, MiniGameKind, number, number][] = [
+      ['npc:rps', 'Rocky', 'rps', 6, 9], ['npc:ttt', 'Tessa', 'ttt', 10, 9],
+      ['npc:chess', 'Magnus', 'chess', 6, 13], ['npc:ludo', 'Lulu', 'ludo', 10, 13],
+    ];
+    layout.gameCenter = {
+      x: CX + cxg + 0.5, y: S + 1, z: CZ + czg + 0.5,
+      npcs: spots.map(([id, name, kind, dx, dz]) => ({
+        id, name, kind, x: CX + dx + 0.5, y: S + 1, z: CZ + dz + 0.5, yaw: Math.atan2(cxg - dx, czg - dz),
+      })),
+    };
+  }
 
   // --- dock ---
   const dz0 = -14;

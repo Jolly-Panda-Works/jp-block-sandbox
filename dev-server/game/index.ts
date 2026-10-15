@@ -35,7 +35,7 @@ const ROOM_NAME = 'blocksy';
  * Bump on any breaking change to messages or shared rules. Client and server each carry a copy of
  * `shared/`; the server refuses clients whose version differs, with a clear error.
  */
-const PROTOCOL_VERSION = 3;
+const PROTOCOL_VERSION = 4;
 /** Players joining with the same multiplayerId share a room; this is used when none is given. */
 const DEFAULT_MULTIPLAYER_ID = 'public';
 const HOTBAR_SLOTS = 9;
@@ -302,6 +302,8 @@ interface IslandLayout {
   stalls: StallInfo[];
   signs: SignInfo[];
   lanterns: [number, number, number][];
+  /** Fenced area with NPCs that play the popup mini-games. */
+  gameCenter: { x: number; y: number; z: number; npcs: GameCenterNpc[] };
 }
 
 const createWorldGrid = (): BlockGrid => new BlockGrid(WORLD_SIZE.x, WORLD_SIZE.y, WORLD_SIZE.z);
@@ -330,7 +332,7 @@ function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
   const layout: IslandLayout = {
     spawn: { x: CX + 0.5, y: S + 1, z: CZ - 15 + 0.5, yaw: 0 },
     center: { x: CX + 0.5, y: S + 1, z: CZ + 0.5 },
-    waterLevel: WATER_LEVEL, stalls: [], signs: [], lanterns: [],
+    waterLevel: WATER_LEVEL, stalls: [], signs: [], lanterns: [], gameCenter: { x: 0, y: 0, z: 0, npcs: [] },
   };
 
   const col = (x: number, z: number) => z * grid.sx + x;
@@ -460,6 +462,36 @@ function generateIsland(grid: BlockGrid, seed: number): IslandLayout {
   };
   sign(-14, -3, 'Build Here', 0);
   sign(-14, 1, 'Build Here', Math.PI);
+
+  // --- game center: stone floor, fence with a gate toward the plaza, lanterns, 4 NPC players ---
+  {
+    const x0 = 4, x1 = 12, z0 = 7, z1 = 15, cxg = 8, czg = 11;
+    for (let dx = x0; dx <= x1; dx++) for (let dz = z0; dz <= z1; dz++) {
+      if (!inIsland(dx, dz)) continue;
+      reserve(dx, dz);
+      for (let y = S + 1; y <= S + 5; y++) set(dx, y, dz, AIR);
+      set(dx, S, dz, B.bricks);
+      prot(dx, S, dz);
+      const edge = dx === x0 || dx === x1 || dz === z0 || dz === z1;
+      const gate = dx === x0 && dz >= czg - 1 && dz <= czg + 1;
+      if (edge && !gate) { set(dx, S + 1, dz, B.fence); prot(dx, S + 1, dz); }
+    }
+    for (const [dx, dz] of [[x0, z0], [x1, z0], [x0, z1], [x1, z1]]) {
+      set(dx, S + 2, dz, B.lantern); prot(dx, S + 2, dz);
+      layout.lanterns.push([CX + dx, S + 2, CZ + dz]);
+    }
+    sign(x0 - 1, czg + 2, 'Game Center', -Math.PI / 2);
+    const spots: [string, string, MiniGameKind, number, number][] = [
+      ['npc:rps', 'Rocky', 'rps', 6, 9], ['npc:ttt', 'Tessa', 'ttt', 10, 9],
+      ['npc:chess', 'Magnus', 'chess', 6, 13], ['npc:ludo', 'Lulu', 'ludo', 10, 13],
+    ];
+    layout.gameCenter = {
+      x: CX + cxg + 0.5, y: S + 1, z: CZ + czg + 0.5,
+      npcs: spots.map(([id, name, kind, dx, dz]) => ({
+        id, name, kind, x: CX + dx + 0.5, y: S + 1, z: CZ + dz + 0.5, yaw: Math.atan2(cxg - dx, czg - dz),
+      })),
+    };
+  }
 
   // --- dock ---
   const dz0 = -14;
@@ -763,6 +795,9 @@ interface ClientMessages {
   mgLeave: Record<string, never>;
   mgSpectate: { gameId: string };
   rename: { name: string };
+  mgBot: { kind: MiniGameKind };
+  mgAddBot: Record<string, never>;
+  mgNpc: { npcId: string };
 }
 
 /** Server → client messages. */
@@ -1198,12 +1233,96 @@ interface MgListing {
   id: string;
   kind: MiniGameKind;
   x: number; y: number; z: number;
-  seats: { id: string; x: number; z: number; yaw: number }[];
+  seats: { id: string; x: number; z: number; yaw: number; name?: string }[];
   spectators: number;
   /** RPS picks, only after a round is revealed. */
   reveal?: Record<string, RpsChoice>;
   phase: 'playing' | 'reveal' | 'over';
 }
+
+// =====================================================================================================
+// Bots (AI players) — ids start with "bot:" (added by a host) or "npc:" (Game Center characters).
+// The AIs are cheap (one-ply heuristics) so they never block the shared server process, and slightly
+// random so they can be beaten.
+// =====================================================================================================
+
+const isBotId = (id: string): boolean => id.startsWith('bot:') || id.startsWith('npc:');
+const BOT_NAMES = ['Ada', 'Rex', 'Nova', 'Pip', 'Zed', 'Mila', 'Taro', 'Juno'] as const;
+
+function rpsBotPick(rng: () => number = Math.random): RpsChoice {
+  return RPS_CHOICES[Math.floor(rng() * 3)];
+}
+
+/** Wins if it can, blocks if it must, prefers centre then corners; 15% of the time it just plays anywhere. */
+function tttBotMove(s: TttState, seat: number, rng: () => number = Math.random): number {
+  const legal = tttLegal(s);
+  const pick = <T>(l: T[]) => l[Math.floor(rng() * l.length)];
+  if (rng() < 0.15) return pick(legal);
+  const winning = (who: number) => legal.find((c) => {
+    const cells = s.cells.slice();
+    cells[c] = who;
+    return tttResult({ cells, turn: 0 }).winner === who;
+  });
+  const w = winning(seat);
+  if (w !== undefined) return w;
+  const b = winning(1 - seat);
+  if (b !== undefined) return b;
+  if (legal.includes(4)) return 4;
+  const corners = legal.filter((c) => c === 0 || c === 2 || c === 6 || c === 8);
+  return corners.length ? pick(corners) : pick(legal);
+}
+
+const PIECE_VALUE: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+
+/** Greedy chess: material gain, promotion, checks and development, minus pieces left hanging. */
+function chessBotMove(s: ChessState, rng: () => number = Math.random): ChessMove | null {
+  const moves = chessLegal(s);
+  if (moves.length === 0) return null;
+  const me = s.turn, them: ChessColor = me === 'w' ? 'b' : 'w';
+  let best = moves[0], bestScore = -Infinity;
+  for (const m of moves) {
+    const target = s.board[m.to];
+    const mover = s.board[m.from].toLowerCase();
+    let score = target ? PIECE_VALUE[target.toLowerCase()] * 10 : 0;
+    if (mover === 'p' && m.to === s.ep) score += 10;
+    if (m.promo) score += m.promo === 'q' ? 80 : -20;
+    const n = chessApply(s, m);
+    const val = PIECE_VALUE[(n.board[m.to] || 'p').toLowerCase()] * 10;
+    if (chessAttacked(n.board, m.to, them)) score -= chessAttacked(n.board, m.to, me) ? val * 0.5 : val;
+    if (chessAttacked(n.board, chessKing(n.board, them), me)) score += 4;
+    const [r, f] = [m.to >> 3, m.to & 7];
+    if (r >= 2 && r <= 5 && f >= 2 && f <= 5) score += 1;
+    if (mover === 'k' && Math.abs(m.to - m.from) !== 2) score -= 2; // don't wander with the king
+    score += rng() * 3;
+    if (score > bestScore) { bestScore = score; best = m; }
+  }
+  return { from: best.from, to: best.to, promo: best.promo };
+}
+
+/** Ludo: always rolls; when moving prefers finishing, capturing, leaving base, entering the home column. */
+function ludoBotAction(s: LudoState, rng: () => number = Math.random): LudoAction {
+  if (s.phase === 'roll') return { type: 'roll' };
+  const movable = ludoMovable(s);
+  let best = movable[0], bestScore = -Infinity;
+  for (const t of movable) {
+    const from = s.tokens[s.turn][t];
+    const to = from < 0 ? 0 : from + s.dice;
+    let score = to * 0.5 + rng();
+    if (to === LUDO_FINISH) score += 100;
+    if (from < 0) score += 40;
+    if (to > 50 && from <= 50) score += 30;
+    if (to <= 50) {
+      const abs = (s.colors[s.turn] * 13 + to) % 52;
+      if ((LUDO_SAFE as readonly number[]).includes(abs)) score += 10;
+      else if (s.tokens.some((list, other) => other !== s.turn && !s.out[other] && list.some((p) => p >= 0 && p <= 50 && (s.colors[other] * 13 + p) % 52 === abs))) score += 60;
+    }
+    if (score > bestScore) { bestScore = score; best = t; }
+  }
+  return { type: 'move', token: best };
+}
+
+/** A Game Center character that plays one mini-game. */
+interface GameCenterNpc { id: string; name: string; kind: MiniGameKind; x: number; y: number; z: number; yaw: number }
 
 // =====================================================================================================
 // SETTINGS (dashboard → Custom settings; every value is validated, with a default)
@@ -1291,7 +1410,7 @@ interface Player {
 
 /** Messages per second per player. "move" is sent at 15 Hz by the client. */
 const RATE_LIMITS: Record<string, number> = {
-  rename: 1, mgInvite: 2, mgCancel: 2, mgAccept: 2, mgStart: 2, mgMove: 6, mgLeave: 2, mgSpectate: 2,
+  rename: 1, mgBot: 2, mgAddBot: 3, mgNpc: 2, mgInvite: 2, mgCancel: 2, mgAccept: 2, mgStart: 2, mgMove: 6, mgLeave: 2, mgSpectate: 2,
   move: 20, place: 12, remove: 12, hotbar: 10, buy: 5, appearance: 2, restore: 1, chat: 2, emoji: 2, emote: 1,
 };
 const STATE_INTERVAL_MS = 100;
@@ -1326,12 +1445,17 @@ interface MgSession {
   ttt?: TttState;
   chess?: { state: ChessState; last: ChessMove | null };
   ludo?: { state: LudoState; lastRoll: number };
+  /** Bumped on every update; a pending bot move only runs if nothing changed meanwhile. */
+  ver: number;
+  botTimers: Delayed[];
 }
+interface Spot { x: number; y: number; z: number; yaw: number }
 interface HubDeps {
   clock: { setTimeout(fn: () => void, ms: number): Delayed };
   players: Map<string, Player>;
   settings: () => BlocksySettings;
   send: (sessionId: string, type: string, msg: unknown) => void;
+  npcs: () => GameCenterNpc[];
 }
 
 const INVITE_TTL_MS = 3 * 60_000;
@@ -1347,11 +1471,65 @@ class MiniGameHub {
   private readonly watching = new Map<string, string>();
   private readonly lobbyOf = new Map<string, string>();
   private counter = 0;
+  private botCounter = 0;
+  /** Names and (virtual) positions of bots and Game Center NPCs. */
+  private readonly botNames = new Map<string, string>();
+  private readonly botSpots = new Map<string, Spot>();
 
   constructor(private readonly d: HubDeps) {}
 
   /** In a game, watching one, or waiting in a Ludo lobby: no walking, building or trading. */
   locked(id: string): boolean { return this.seatOf.has(id) || this.watching.has(id) || this.lobbyOf.has(id); }
+  private nameOf(id: string): string { return this.d.players.get(id)?.username ?? this.botNames.get(id) ?? 'Player'; }
+
+  /** Creates a bot that stands `dist` metres from the host, at an angle around the host's facing. */
+  private newBot(host: Player, dist: number, angle: number): string {
+    const id = `bot:${(this.botCounter++).toString(36)}`;
+    this.botNames.set(id, `🤖 ${BOT_NAMES[this.botCounter % BOT_NAMES.length]}`);
+    const yaw = host.yaw + angle;
+    const x = host.x + Math.sin(yaw) * dist, z = host.z + Math.cos(yaw) * dist;
+    this.botSpots.set(id, { x, y: host.y, z, yaw: Math.atan2(host.x - x, host.z - z) });
+    return id;
+  }
+
+  /** Host plays against a bot (2-player games), or opens a Ludo table with one bot seated. */
+  playBot(id: string, kind: MiniGameKind): string | null {
+    const host = this.d.players.get(id);
+    if (!host || this.locked(id)) return 'You are already in a game.';
+    if (kind === 'ludo') {
+      if (this.invites.get(id)?.kind !== 'ludo') this.invite(id, 'ludo');
+      return this.addBot(id);
+    }
+    this.cancel(id);
+    this.start(kind, [id, this.newBot(host, 2, 0)]);
+    return null;
+  }
+
+  /** Ludo host: seat a bot at the table (up to 4 players). */
+  addBot(hostId: string): string | null {
+    const inv = this.invites.get(hostId), host = this.d.players.get(hostId);
+    if (!inv || inv.kind !== 'ludo' || !host) return 'Open a Ludo table first.';
+    if (inv.guests.length >= 3) return 'This Ludo table is full.';
+    inv.guests.push(this.newBot(host, 1.6, Math.PI / 2 + inv.guests.length * (Math.PI / 2)));
+    this.sendLobby(inv);
+    return null;
+  }
+
+  /** Play with a Game Center character (one game at a time per character). */
+  playNpc(id: string, npcId: string): string | null {
+    const npc = this.d.npcs().find((n) => n.id === npcId);
+    const p = this.d.players.get(id);
+    if (!npc || !p) return 'Nobody to play with here.';
+    if (this.locked(id)) return 'You are already in a game.';
+    if (this.seatOf.has(npc.id)) return `${npc.name} is busy — you can watch or wait.`;
+    if (Math.hypot(p.x - npc.x, p.z - npc.z) > ACCEPT_RADIUS + 0.5) return 'Walk closer.';
+    this.cancel(id);
+    this.botNames.set(npc.id, `🤖 ${npc.name}`);
+    this.botSpots.set(npc.id, { x: npc.x, y: npc.y, z: npc.z, yaw: npc.yaw });
+    this.start(npc.kind, [id, npc.id]);
+    return null;
+  }
+
   /** Seated player (emotes disabled). */
   playing(id: string): boolean { return this.seatOf.has(id); }
 
@@ -1363,7 +1541,8 @@ class MiniGameHub {
 
   listing(): MgListing[] {
     return [...this.sessions.values()].map((s) => {
-      const l: MgListing = { id: s.id, kind: s.kind, ...s.table, seats: s.seatPos, spectators: s.spectators.size, phase: s.phase };
+      const seats = s.seatPos.map((x) => (isBotId(x.id) ? { ...x, name: this.nameOf(x.id) } : x));
+      const l: MgListing = { id: s.id, kind: s.kind, ...s.table, seats, spectators: s.spectators.size, phase: s.phase };
       if (s.rps?.reveal) l.reveal = Object.fromEntries(s.seats.map((id, i) => [id, s.rps!.reveal![i]!]).filter(([, v]) => !!v));
       return l;
     });
@@ -1388,6 +1567,7 @@ class MiniGameHub {
     for (const g of [hostId, ...inv.guests]) {
       this.lobbyOf.delete(g);
       this.d.send(g, 'mgLobby', null);
+      if (g.startsWith('bot:')) { this.botNames.delete(g); this.botSpots.delete(g); }
     }
   }
 
@@ -1417,7 +1597,7 @@ class MiniGameHub {
   startLobby(hostId: string): void {
     const inv = this.invites.get(hostId);
     if (!inv || inv.kind !== 'ludo' || inv.guests.length < 1) return;
-    const ids = [hostId, ...inv.guests].filter((x) => this.d.players.has(x));
+    const ids = [hostId, ...inv.guests].filter((x) => this.d.players.has(x) || isBotId(x));
     inv.expiry?.clear();
     this.invites.delete(hostId);
     for (const g of ids) { this.lobbyOf.delete(g); this.d.send(g, 'mgLobby', null); }
@@ -1425,7 +1605,7 @@ class MiniGameHub {
   }
 
   private sendLobby(inv: MgInvite): void {
-    const members = [inv.hostId, ...inv.guests].map((id) => ({ id, name: this.d.players.get(id)?.username ?? 'Player' }));
+    const members = [inv.hostId, ...inv.guests].map((id) => ({ id, name: this.nameOf(id) }));
     const view: MgLobby = { hostId: inv.hostId, kind: inv.kind, members };
     for (const m of members) this.d.send(m.id, 'mgLobby', view);
   }
@@ -1433,7 +1613,13 @@ class MiniGameHub {
   // ---------------- sessions ----------------
 
   private start(kind: MiniGameKind, ids: string[]): void {
-    const ps = ids.map((id) => this.d.players.get(id)!);
+    // Real players and bots share one shape; bots only have a virtual position.
+    const ps = ids.map((id) => {
+      const p = this.d.players.get(id);
+      if (p) return p;
+      const spot = this.botSpots.get(id) ?? { x: 0, y: 0, z: 0, yaw: 0 };
+      return { sessionId: id, username: this.nameOf(id), ...spot } as Player;
+    });
     const host = ps[0];
     const cx = ps.reduce((n, p) => n + p.x, 0) / ps.length, cz = ps.reduce((n, p) => n + p.z, 0) / ps.length;
     let dx = ps[1].x - host.x, dz = ps[1].z - host.z;
@@ -1443,7 +1629,7 @@ class MiniGameHub {
       id: `g${Date.now().toString(36)}${(this.counter++).toString(36)}`,
       kind, seats: ids, names: ps.map((p) => p.username), spectators: new Set(),
       table: { x: round3(cx), y: round3(host.y), z: round3(cz) }, seatPos: [],
-      phase: 'playing', result: null, timer: null, deadline: 0,
+      phase: 'playing', result: null, timer: null, deadline: 0, ver: 0, botTimers: [],
     };
     if (kind === 'rps') {
       // Stand where they are, facing each other.
@@ -1451,7 +1637,7 @@ class MiniGameHub {
         const o = ps[1 - i];
         return { id: p.sessionId, x: round3(p.x), z: round3(p.z), yaw: round3(Math.atan2(o.x - p.x, o.z - p.z)) };
       });
-      s.seatPos.forEach((seat, i) => { ps[i].yaw = seat.yaw; this.d.send(seat.id, 'teleport', { x: ps[i].x, y: ps[i].y, z: ps[i].z, yaw: seat.yaw }); });
+      s.seatPos.forEach((seat, i) => { ps[i].yaw = seat.yaw; if (!isBotId(seat.id)) this.d.send(seat.id, 'teleport', { x: ps[i].x, y: ps[i].y, z: ps[i].z, yaw: seat.yaw }); });
     } else {
       // Sit around a table that appears between the players.
       const n = ps.length;
@@ -1464,7 +1650,7 @@ class MiniGameHub {
       s.seatPos.forEach((seat, i) => {
         const p = ps[i];
         p.x = seat.x; p.z = seat.z; p.y = host.y; p.yaw = seat.yaw;
-        this.d.send(seat.id, 'teleport', { x: seat.x, y: host.y, z: seat.z, yaw: seat.yaw });
+        if (!isBotId(seat.id)) this.d.send(seat.id, 'teleport', { x: seat.x, y: host.y, z: seat.z, yaw: seat.yaw });
       });
     }
     for (const id of ids) { this.cancel(id); this.seatOf.set(id, s.id); }
@@ -1495,6 +1681,16 @@ class MiniGameHub {
     r.round += 1; r.picks = [null, null]; r.reveal = null; r.roundWinner = -1;
     s.phase = 'playing';
     this.arm(s, this.d.settings().rpsPickSec * 1000, () => this.rpsResolve(s));
+    const round = r.round;
+    s.seats.forEach((id, seat) => {
+      if (!isBotId(id)) return;
+      s.botTimers.push(this.d.clock.setTimeout(() => {
+        if (s.phase !== 'playing' || r.round !== round || r.picks[seat]) return;
+        r.picks[seat] = rpsBotPick();
+        if (r.picks.every((p) => !!p)) this.rpsResolve(s);
+        else this.push(s);
+      }, 500 + Math.random() * 1500));
+    });
     this.push(s);
   }
 
@@ -1574,6 +1770,20 @@ class MiniGameHub {
     this.push(s);
   }
 
+  /** If it's a bot's turn, play after a short pause (cancelled automatically if anything changes). */
+  private scheduleBot(s: MgSession): void {
+    if (s.phase !== 'playing' || s.rps) return;
+    const seat = this.turnSeat(s);
+    if (seat < 0 || !isBotId(s.seats[seat])) return;
+    const ver = s.ver;
+    s.botTimers.push(this.d.clock.setTimeout(() => {
+      if (s.phase !== 'playing' || s.ver !== ver || this.turnSeat(s) !== seat) return;
+      if (s.ttt) this.applyMove(s, seat, tttBotMove(s.ttt, seat));
+      else if (s.chess) { const m = chessBotMove(s.chess.state); if (m) this.applyMove(s, seat, m); }
+      else if (s.ludo) this.applyMove(s, seat, ludoBotAction(s.ludo.state));
+    }, 700 + Math.random() * 900));
+  }
+
   private finish(s: MgSession, winners: string[], reason: string): void {
     if (s.phase === 'over') return;
     s.phase = 'over';
@@ -1585,6 +1795,8 @@ class MiniGameHub {
 
   private close(s: MgSession): void {
     s.timer?.clear();
+    for (const t of s.botTimers) t.clear();
+    for (const id of s.seats) if (id.startsWith('bot:')) { this.botNames.delete(id); this.botSpots.delete(id); }
     this.sessions.delete(s.id);
     for (const id of [...s.seats, ...s.spectators]) {
       if (this.seatOf.get(id) === s.id) this.seatOf.delete(id);
@@ -1638,6 +1850,7 @@ class MiniGameHub {
       s.ludo.state = ludoLeave(s.ludo.state, seat);
       const active = ludoActive(s.ludo.state);
       if (active.length < 2) return this.finish(s, active.map((i) => s.seats[i]), 'left');
+      if (active.every((i) => isBotId(s.seats[i]))) return this.finish(s, [], 'left');
       this.arm(s, this.d.settings().ludoTurnSec * 1000, () => this.autoPlay(s));
       this.push(s);
       return;
@@ -1656,6 +1869,9 @@ class MiniGameHub {
   }
 
   private push(s: MgSession): void {
+    s.ver += 1;
+    s.botTimers = s.botTimers.filter((t) => (t as Delayed & { active?: boolean }).active !== false);
+    this.scheduleBot(s);
     for (const id of [...s.seats, ...s.spectators]) {
       if (this.seatOf.get(id) === s.id || this.watching.get(id) === s.id) this.d.send(id, 'mg', this.view(s, id));
     }
@@ -1718,6 +1934,7 @@ export default class BlocksyRoom extends Room {
       players: this.players,
       settings: () => this.settings,
       send: (id, type, msg) => { for (const c of this.clients) if (c.sessionId === id) c.send(type, msg); },
+      npcs: () => this.layout.gameCenter.npcs,
     });
     // The session timer starts after the first join, once the match config is known (see startSessionTimer).
 
@@ -1743,6 +1960,21 @@ export default class BlocksyRoom extends Room {
     });
     this.onMessage('mgInvite', (c: Client, m: { kind?: unknown }) => {
       if (this.guard(c, 'mgInvite') && isObj(m) && isMiniGameKind(m.kind)) this.hub.invite(c.sessionId, m.kind);
+    });
+    this.onMessage('mgBot', (c: Client, m: { kind?: unknown }) => {
+      if (!this.guard(c, 'mgBot') || !isObj(m) || !isMiniGameKind(m.kind)) return;
+      const err = this.hub.playBot(c.sessionId, m.kind);
+      if (err) c.send('mgError', { message: err });
+    });
+    this.onMessage('mgAddBot', (c: Client) => {
+      if (!this.guard(c, 'mgAddBot')) return;
+      const err = this.hub.addBot(c.sessionId);
+      if (err) c.send('mgError', { message: err });
+    });
+    this.onMessage('mgNpc', (c: Client, m: { npcId?: unknown }) => {
+      if (!this.guard(c, 'mgNpc') || !isObj(m) || typeof m.npcId !== 'string') return;
+      const err = this.hub.playNpc(c.sessionId, m.npcId);
+      if (err) c.send('mgError', { message: err });
     });
     this.onMessage('mgCancel', (c: Client) => { if (this.guard(c, 'mgCancel')) this.hub.cancel(c.sessionId); });
     this.onMessage('mgAccept', (c: Client, m: { hostId?: unknown }) => {

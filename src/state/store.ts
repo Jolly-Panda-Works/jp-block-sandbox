@@ -36,6 +36,8 @@ interface GameState {
   /** Closest invite / game in reach (set by the local player controller). */
   nearInvite: { hostId: string; name: string; kind: MiniGameKind; waitMs: number } | null;
   nearGame: { id: string; kind: MiniGameKind } | null;
+  /** Free Game Center character in reach. */
+  nearNpc: { id: string; name: string; kind: MiniGameKind } | null;
   layout: IslandLayout | null;
   profile: ProfileData;
   selectedSlot: number;
@@ -97,6 +99,7 @@ export const useGame = create<GameState>()((set, get) => ({
   acceptDelayMs: 5000,
   nearInvite: null,
   nearGame: null,
+  nearNpc: null,
   layout: null,
   profile: createProfile(),
   selectedSlot: 0,

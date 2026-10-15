@@ -51,6 +51,12 @@ export interface ClientMessages {
   mgLeave: Record<string, never>;
   mgSpectate: { gameId: string };
   rename: { name: string };
+  /** Start a 2-player game against a bot, or (Ludo) open a table and seat a bot. */
+  mgBot: { kind: MiniGameKind };
+  /** Ludo host: seat another bot at the table. */
+  mgAddBot: Record<string, never>;
+  /** Play with a Game Center character. */
+  mgNpc: { npcId: string };
 }
 
 /** Server → client messages. */

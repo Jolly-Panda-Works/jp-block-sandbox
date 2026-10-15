@@ -2,7 +2,7 @@ import { useGame } from '../state/store';
 import { Environment } from './Environment';
 import { WorldMesh } from './WorldMesh';
 import { LocalPlayer } from '../game/LocalPlayer';
-import { LocalLabel, RemotePlayers, Shopkeepers } from './Characters';
+import { BotSeats, GameCenterNpcs, LocalLabel, RemotePlayers, Shopkeepers } from './Characters';
 import { GameTables } from './GameTables';
 
 export function Scene() {
@@ -17,6 +17,8 @@ export function Scene() {
       <RemotePlayers />
       <Shopkeepers layout={layout} />
       <GameTables />
+      <GameCenterNpcs layout={layout} />
+      <BotSeats />
     </>
   );
 }

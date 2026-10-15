@@ -402,9 +402,93 @@ export interface MgListing {
   id: string;
   kind: MiniGameKind;
   x: number; y: number; z: number;
-  seats: { id: string; x: number; z: number; yaw: number }[];
+  seats: { id: string; x: number; z: number; yaw: number; name?: string }[];
   spectators: number;
   /** RPS picks, only after a round is revealed. */
   reveal?: Record<string, RpsChoice>;
   phase: 'playing' | 'reveal' | 'over';
 }
+
+// =====================================================================================================
+// Bots (AI players) — ids start with "bot:" (added by a host) or "npc:" (Game Center characters).
+// The AIs are cheap (one-ply heuristics) so they never block the shared server process, and slightly
+// random so they can be beaten.
+// =====================================================================================================
+
+export const isBotId = (id: string): boolean => id.startsWith('bot:') || id.startsWith('npc:');
+export const BOT_NAMES = ['Ada', 'Rex', 'Nova', 'Pip', 'Zed', 'Mila', 'Taro', 'Juno'] as const;
+
+export function rpsBotPick(rng: () => number = Math.random): RpsChoice {
+  return RPS_CHOICES[Math.floor(rng() * 3)];
+}
+
+/** Wins if it can, blocks if it must, prefers centre then corners; 15% of the time it just plays anywhere. */
+export function tttBotMove(s: TttState, seat: number, rng: () => number = Math.random): number {
+  const legal = tttLegal(s);
+  const pick = <T>(l: T[]) => l[Math.floor(rng() * l.length)];
+  if (rng() < 0.15) return pick(legal);
+  const winning = (who: number) => legal.find((c) => {
+    const cells = s.cells.slice();
+    cells[c] = who;
+    return tttResult({ cells, turn: 0 }).winner === who;
+  });
+  const w = winning(seat);
+  if (w !== undefined) return w;
+  const b = winning(1 - seat);
+  if (b !== undefined) return b;
+  if (legal.includes(4)) return 4;
+  const corners = legal.filter((c) => c === 0 || c === 2 || c === 6 || c === 8);
+  return corners.length ? pick(corners) : pick(legal);
+}
+
+const PIECE_VALUE: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+
+/** Greedy chess: material gain, promotion, checks and development, minus pieces left hanging. */
+export function chessBotMove(s: ChessState, rng: () => number = Math.random): ChessMove | null {
+  const moves = chessLegal(s);
+  if (moves.length === 0) return null;
+  const me = s.turn, them: ChessColor = me === 'w' ? 'b' : 'w';
+  let best = moves[0], bestScore = -Infinity;
+  for (const m of moves) {
+    const target = s.board[m.to];
+    const mover = s.board[m.from].toLowerCase();
+    let score = target ? PIECE_VALUE[target.toLowerCase()] * 10 : 0;
+    if (mover === 'p' && m.to === s.ep) score += 10;
+    if (m.promo) score += m.promo === 'q' ? 80 : -20;
+    const n = chessApply(s, m);
+    const val = PIECE_VALUE[(n.board[m.to] || 'p').toLowerCase()] * 10;
+    if (chessAttacked(n.board, m.to, them)) score -= chessAttacked(n.board, m.to, me) ? val * 0.5 : val;
+    if (chessAttacked(n.board, chessKing(n.board, them), me)) score += 4;
+    const [r, f] = [m.to >> 3, m.to & 7];
+    if (r >= 2 && r <= 5 && f >= 2 && f <= 5) score += 1;
+    if (mover === 'k' && Math.abs(m.to - m.from) !== 2) score -= 2; // don't wander with the king
+    score += rng() * 3;
+    if (score > bestScore) { bestScore = score; best = m; }
+  }
+  return { from: best.from, to: best.to, promo: best.promo };
+}
+
+/** Ludo: always rolls; when moving prefers finishing, capturing, leaving base, entering the home column. */
+export function ludoBotAction(s: LudoState, rng: () => number = Math.random): LudoAction {
+  if (s.phase === 'roll') return { type: 'roll' };
+  const movable = ludoMovable(s);
+  let best = movable[0], bestScore = -Infinity;
+  for (const t of movable) {
+    const from = s.tokens[s.turn][t];
+    const to = from < 0 ? 0 : from + s.dice;
+    let score = to * 0.5 + rng();
+    if (to === LUDO_FINISH) score += 100;
+    if (from < 0) score += 40;
+    if (to > 50 && from <= 50) score += 30;
+    if (to <= 50) {
+      const abs = (s.colors[s.turn] * 13 + to) % 52;
+      if ((LUDO_SAFE as readonly number[]).includes(abs)) score += 10;
+      else if (s.tokens.some((list, other) => other !== s.turn && !s.out[other] && list.some((p) => p >= 0 && p <= 50 && (s.colors[other] * 13 + p) % 52 === abs))) score += 60;
+    }
+    if (score > bestScore) { bestScore = score; best = t; }
+  }
+  return { type: 'move', token: best };
+}
+
+/** A Game Center character that plays one mini-game. */
+export interface GameCenterNpc { id: string; name: string; kind: MiniGameKind; x: number; y: number; z: number; yaw: number }

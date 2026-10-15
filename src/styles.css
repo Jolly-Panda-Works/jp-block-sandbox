@@ -261,7 +261,9 @@ textarea:focus { border-color: var(--accent); }
 .mg-prompt { cursor: pointer; pointer-events: auto; }
 .games-panel { width: min(560px, 94vw); }
 .game-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-.game-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 16px 8px; }
+.game-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 8px; background: var(--tile); border-radius: 12px; }
+.game-actions { display: flex; gap: 6px; margin-top: 6px; }
+.game-actions button { padding: 6px 12px; }
 .game-card small { color: var(--sub); }
 .game-icon { font-size: 36px; }
 .game-icon.big { font-size: 56px; }

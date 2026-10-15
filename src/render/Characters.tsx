@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { AIR, createRng, miniGameInfo, randomAppearance, type IslandLayout, type MiniGameKind } from '@jp/blocksy-shared';
+import { AIR, createRng, hashString, isBotId, miniGameInfo, randomAppearance, type IslandLayout, type MgListing, type MiniGameKind } from '@jp/blocksy-shared';
 import { Avatar } from './Avatar';
 import { applyGamePose, getAnim, now, playEmote } from './animState';
 import { remotes } from '../net/network';
@@ -105,4 +105,42 @@ export function Shopkeepers({ layout }: { layout: IslandLayout }) {
       ))}
     </>
   );
+}
+
+/** Each bot / NPC always looks the same (appearance derived from its id). */
+const botLook = (id: string) => randomAppearance(createRng(hashString(id)));
+
+/** Game Center characters waiting for a player (an NPC in a game is drawn at its seat by BotSeats). */
+export function GameCenterNpcs({ layout }: { layout: IslandLayout }) {
+  const games = useGame((s) => s.games);
+  const looks = useMemo(() => new Map(layout.gameCenter.npcs.map((n) => [n.id, botLook(n.id)])), [layout]);
+  const busy = new Set(games.flatMap((g) => g.seats.map((x) => x.id)));
+  return (
+    <>
+      {layout.gameCenter.npcs.filter((n) => !busy.has(n.id)).map((n) => (
+        <group key={n.id} position={[n.x, n.y, n.z]} rotation={[0, n.yaw, 0]}>
+          <Avatar appearance={looks.get(n.id)!} anim={getAnim(n.id)} />
+          <Label id={n.id} name={`🤖 ${n.name}`} invite={n.kind} />
+        </group>
+      ))}
+    </>
+  );
+}
+
+function BotSeat({ game, seat }: { game: MgListing; seat: MgListing['seats'][number] }) {
+  const anim = getAnim(seat.id);
+  const look = useMemo(() => botLook(seat.id), [seat.id]);
+  useFrame(() => applyGamePose(seat.id, anim, useGame.getState().games));
+  return (
+    <group position={[seat.x, game.y, seat.z]} rotation={[0, seat.yaw, 0]}>
+      <Avatar appearance={look} anim={anim} />
+      <Label id={seat.id} name={seat.name ?? '🤖 Bot'} />
+    </group>
+  );
+}
+
+/** Bots and NPCs taking part in a mini-game, drawn at their seat (seated or playing Rock Paper Scissors). */
+export function BotSeats() {
+  const games = useGame((s) => s.games);
+  return <>{games.flatMap((g) => g.seats.filter((x) => isBotId(x.id)).map((x) => <BotSeat key={x.id} game={g} seat={x} />))}</>;
 }
