@@ -9,7 +9,7 @@
     "build": "tsc --noEmit -p . && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p .",
-    "test": "tsx --test shared/test/*.test.ts",
+    "test": "tsx --test shared/test/*.test.ts test/imports.test.ts test/fileNames.test.ts",
     "shared:hash": "node shared/hash.mjs",
     "dev:server": "npm --prefix dev-server run dev",
     "dev:all": "concurrently -k -n server,game -c cyan,magenta \"npm run dev:server\" \"npm run dev\"",

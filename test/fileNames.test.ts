@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,7 +23,7 @@ test('no two modules in a folder differ only by letter case', () => {
       else seen.set(base, name);
     }
   };
-  walk(new URL('../src', import.meta.url).pathname);
-  walk(new URL('../shared/src', import.meta.url).pathname);
+  walk(fileURLToPath(new URL('../src', import.meta.url)));
+  walk(fileURLToPath(new URL('../shared/src', import.meta.url)));
   assert.deepEqual(clashes, []);
 });

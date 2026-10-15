@@ -21,11 +21,33 @@ function takeSecret(name: string): string {
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Only trusted servers may come from the address bar (?api=, ?wsUrl=). Without this a crafted link could
+ * point the game at someone else's server and leak the player's sign-in token.
+ */
+export function trustedUrl(raw: string | null, fallback: string, protocols: readonly string[]): string {
+  if (!raw) return fallback;
+  try {
+    const u = new URL(raw);
+    const host = u.hostname;
+    const trusted = [fallback, env.VITE_API_BASE_URL ?? '', env.VITE_WS_URL ?? '']
+      .filter(Boolean).some((f) => { try { return new URL(f).hostname === host; } catch { return false; } });
+    const ok = protocols.includes(u.protocol)
+      && (trusted || host === 'rastar.ir' || host.endsWith('.rastar.ir') || host === 'localhost' || host === '127.0.0.1');
+    return ok ? raw.replace(/\/+$/, '') : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Address of this game page without query string (where the token bookmark sends players). */
+export const gamePageUrl = (): string => `${location.origin}${location.pathname}`;
+
 export const config = {
   /** Rastaar backend origin, e.g. https://api.rastar.ir (the token path below is appended). */
-  apiBaseUrl: trimSlash(query.get('api') ?? env.VITE_API_BASE_URL ?? ''),
+  apiBaseUrl: trimSlash(trustedUrl(query.get('api'), env.VITE_API_BASE_URL ?? '', ['https:', 'http:'])),
   tokenPath: env.VITE_TOKEN_PATH || '/api/v1/client/realtime/token',
-  wsUrl: query.get('wsUrl') ?? (env.VITE_WS_URL || 'wss://gameserver.rastar.ir'),
+  wsUrl: trustedUrl(query.get('wsUrl'), env.VITE_WS_URL || 'wss://gameserver.rastar.ir', ['wss:', 'ws:']),
   /** Game key on the platform (= Colyseus room name). */
   roomName: env.VITE_ROOM_NAME || 'blocksy',
   /** The backend's match id (UUID). Players with the same id play together. */
