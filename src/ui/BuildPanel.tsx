@@ -51,8 +51,7 @@ export function BuildPanel() {
         <h3>Your bag <span className="count">{bag.length}</span></h3>
         {bag.length === 0 ? (
           <div className="empty-bag">
-            Your bag is empty. Get blocks at a shop stall — everything is free.
-            <button className="primary" onClick={() => openPanel('shop')}>Open shop</button>
+            Your bag is empty. Visit the 🧱 Blocks or 🌼 Decor stall at the market and press E — everything is free.
           </div>
         ) : (
           <div className="bag">
@@ -70,7 +69,6 @@ export function BuildPanel() {
         )}
 
         <footer>
-          <button onClick={() => openPanel('shop')}>🧱 Shop</button>
           <button onClick={() => start('none')} className={tool === 'none' ? 'active-tool' : ''}>✋ Hands empty</button>
           <button onClick={() => start('destroy')} className={tool === 'destroy' ? 'active-tool' : ''}>🔨 Destroy (0)</button>
           <button className="primary" onClick={() => start('block')}>Build with slot {selectedSlot + 1}</button>

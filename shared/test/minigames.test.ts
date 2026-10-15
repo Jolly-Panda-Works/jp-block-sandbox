@@ -173,3 +173,24 @@ test('room settings are clamped and filtered', () => {
     { animals: ['cow'], chatEnabled: false, ambientBots: 8, dayLengthMin: 0 });
   assert.deepEqual(sanitizeRoomSettings('nope'), {});
 });
+
+import { evaluatePlacement as evalPlace, hasSupport, BLOCKS as ALL_BLOCKS, TILE_KEYS as ALL_TILES, BlockGrid as Grid } from '../src/index';
+
+test('building: a block needs a neighbour on ANY side (not necessarily below)', () => {
+  const g = new Grid(16, 16, 16);
+  const stone = blockId('stone');
+  g.set(5, 5, 5, stone);
+  assert.equal(evalPlace(g, 6, 5, 5, stone, []), 'ok', 'beside a block, with air underneath');
+  assert.equal(evalPlace(g, 5, 4, 5, stone, []), 'ok', 'hanging under a block');
+  assert.equal(evalPlace(g, 9, 9, 9, stone, []), 'no_support', 'floating in the air');
+  g.set(9, 8, 9, blockId('rose'));
+  assert.ok(!hasSupport(g, 9, 9, 9), 'plants are not support');
+  // a whole bridge out over the void, one block at a time
+  for (let x = 6; x < 15; x++) { assert.equal(evalPlace(g, x, 5, 5, stone, []), 'ok'); g.set(x, 5, 5, stone); }
+});
+
+test('decor catalogue: many decorative items, every tile painted', () => {
+  const decor = ALL_BLOCKS.filter((b) => b.purchasable && b.category === 'decor');
+  assert.ok(decor.length >= 28, `decor items: ${decor.length}`);
+  for (const b of ALL_BLOCKS) for (const tile of [b.top, b.side, b.bottom]) assert.ok((ALL_TILES as readonly string[]).includes(tile), `${b.key} uses unknown tile ${tile}`);
+});

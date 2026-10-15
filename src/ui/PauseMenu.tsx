@@ -40,7 +40,6 @@ export function PauseMenu() {
         <header><span className="muted">⚙️ Settings</span><img className="menu-logo" src={asset("blocksy-logo-light.png")} alt="Blocksy" /><h2>Menu</h2></header>
         <button className="primary wide" onClick={() => openPanel('none')}>Resume</button>
         <div className="pause-row">
-          <button onClick={() => openPanel('shop')}>🧱 Shop</button>
           <button onClick={() => openPanel('customize')}>👕 Style</button>
           <button onClick={() => openPanel('build')}>🔨 Build</button>
           <button onClick={() => openPanel('social')}>😊 Social</button>

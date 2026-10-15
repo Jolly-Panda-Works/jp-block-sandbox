@@ -30,11 +30,10 @@ function onKey(code: string): void {
     if (code === 'KeyV') { useGame.setState({ cameraMode: s.cameraMode === 'first' ? 'third' : 'first' }); return; }
     if (code === 'KeyG') return togglePanel('social');
     if (code === 'KeyC') return togglePanel('customize');
-    if (code === 'KeyB' || code === 'KeyT' || code === 'KeyP') s.showToast('Not available while in a mini-game');
+    if (code === 'KeyT' || code === 'KeyP') s.showToast('Not available while in a mini-game');
     return;
   }
   if (code === 'KeyP') return togglePanel('games');
-  if (code === 'KeyB') return togglePanel('shop');
   if (code === 'KeyC') return togglePanel('customize');
   if (code === 'KeyT') return togglePanel('build');
   if (code === 'KeyG') return togglePanel('social');

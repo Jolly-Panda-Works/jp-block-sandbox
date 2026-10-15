@@ -12,6 +12,9 @@ export const TILE_KEYS = [
   'wool_red', 'wool_yellow', 'wool_blue', 'crafting_top', 'crafting_side', 'chest_top', 'chest_side', 'lantern',
   'flower_white', 'flower_yellow', 'tall_grass', 'island_core',
   'water', 'hay_top', 'hay_side', 'hive_top', 'hive_side', 'spruce_log_top', 'spruce_log_side', 'spruce_leaves', 'bamboo',
+  'bookshelf_side', 'barrel_top', 'barrel_side', 'crate', 'pumpkin_top', 'pumpkin_side', 'jack_face', 'melon_top', 'melon_side',
+  'checker', 'glass_teal', 'glass_red', 'mushroom_block', 'white_planks', 'rose', 'tulip_pink', 'blue_orchid', 'sunflower',
+  'red_mushroom', 'brown_mushroom', 'fern', 'sapling', 'lantern_blue', 'lantern_paper', 'terracotta', 'mossy_cobblestone', 'quartz',
 ] as const;
 
 type C = [number, number, number, number];
@@ -146,6 +149,80 @@ const painters: Record<string, (t: Tile) => void> = {
     }
     return c(44, 40, 38);
   }),
+  bookshelf_side: (t) => {
+    const cols = [c(170, 50, 45), c(60, 90, 160), c(70, 130, 70), c(200, 170, 60), c(120, 70, 140), c(214, 208, 196)];
+    const pick = Array.from({ length: 32 }, () => cols[Math.floor(t.rng() * cols.length)]);
+    return t.each((x, y) => {
+      if (y <= 1 || y >= 14 || y === 7 || y === 8) return mul(c(150, 108, 64), t.jit(0.06));
+      if (x === 0 || x === 15) return c(110, 78, 44);
+      const k = pick[(y < 7 ? 0 : 16) + x];
+      return x % 3 === 0 ? mul(k, 0.68) : mul(k, t.jit(0.08));
+    });
+  },
+  barrel_side: (t) => t.each((x, y) => (y === 2 || y === 3 || y === 12 || y === 13 ? c(70, 66, 62) : mul(c(142, 96, 54), (x % 4 === 0 ? 0.72 : 1) * t.jit(0.07)))),
+  barrel_top: (t) => t.each((x, y) => {
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    return d > 7 ? c(70, 66, 62) : mul(c(160, 112, 66), (y % 4 === 0 ? 0.8 : 1) * t.jit(0.06));
+  }),
+  crate: (t) => t.each((x, y) => {
+    if (x <= 1 || x >= 14 || y <= 1 || y >= 14) return mul(c(120, 84, 46), t.jit(0.06));
+    if (Math.abs(x - y) <= 1 || Math.abs(x + y - 15) <= 1) return mul(c(132, 92, 52), t.jit(0.05));
+    return mul(c(186, 140, 84), (y % 4 === 0 ? 0.86 : 1) * t.jit(0.07));
+  }),
+  pumpkin_side: (t) => t.each((x) => mul(c(226, 128, 34), (x % 4 === 0 ? 0.72 : 1) * t.jit(0.07))),
+  pumpkin_top: (t) => t.each((x, y) => (x >= 6 && x <= 9 && y >= 6 && y <= 9 ? c(84, 120, 44) : mul(c(214, 120, 32), t.jit(0.08)))),
+  jack_face: (t) => t.each((x, y) => {
+    const eye = (y >= 4 && y <= 6) && ((x >= 3 && x <= 5) || (x >= 10 && x <= 12)) && y - 4 <= Math.min(Math.abs(x - 2), Math.abs(x - 13));
+    const mouth = y >= 9 && y <= 11 && x >= 3 && x <= 12 && !(y === 9 && (x === 5 || x === 10)) && !(y === 11 && (x === 7 || x === 8));
+    if (eye || mouth) return c(255, 214, 92);
+    return mul(c(226, 128, 34), (x % 4 === 0 ? 0.72 : 1) * t.jit(0.07));
+  }),
+  melon_side: (t) => t.each((x) => mul(x % 4 < 2 ? c(84, 150, 52) : c(56, 112, 38), t.jit(0.06))),
+  melon_top: (t) => t.each((x, y) => mul(Math.hypot(x - 7.5, y - 7.5) < 3 ? c(120, 170, 70) : c(70, 132, 46), t.jit(0.07))),
+  checker: (t) => t.each((x, y) => ((x >> 2) + (y >> 2)) % 2 ? c(34, 36, 40) : c(236, 234, 228)),
+  glass_teal: (t) => t.each((x, y) => (x === 0 || y === 0 || x === 15 || y === 15 ? c(40, 140, 130, 230) : (x + y === 10 || x + y === 12) ? c(200, 255, 245, 150) : c(61, 219, 185, 105))),
+  glass_red: (t) => t.each((x, y) => (x === 0 || y === 0 || x === 15 || y === 15 ? c(150, 40, 40, 230) : (x + y === 10 || x + y === 12) ? c(255, 210, 210, 150) : c(220, 60, 60, 105))),
+  mushroom_block: (t) => t.each((x, y) => {
+    const spot = [[3, 3], [11, 4], [6, 10], [12, 12], [2, 12]].some(([sx, sy]) => Math.hypot(x - sx, y - sy) < 1.6);
+    return spot ? c(244, 240, 232) : mul(c(196, 44, 44), t.jit(0.07));
+  }),
+  white_planks: (t) => t.each((x, y) => mul(c(232, 228, 218), (y % 4 === 0 ? 0.86 : ((x + Math.floor(y / 4) * 5) % 16 === 0 ? 0.9 : 1)) * t.jit(0.04))),
+  rose: (t) => flower(t, c(206, 34, 48), c(130, 18, 28)),
+  tulip_pink: (t) => flower(t, c(240, 128, 172), c(252, 206, 96)),
+  blue_orchid: (t) => flower(t, c(78, 150, 232), c(250, 240, 180)),
+  sunflower: (t) => flower(t, c(250, 200, 40), c(110, 70, 30)),
+  red_mushroom: (t) => t.each((x, y) => {
+    if (y >= 9 && x >= 7 && x <= 8) return c(236, 230, 214);
+    if (y >= 4 && y <= 8 && x >= 3 && x <= 12 && Math.abs(x - 7.5) <= 4.5 - (8 - y) * 0.6) return (x + y) % 5 === 0 ? c(250, 248, 240) : c(204, 40, 40);
+    return CLEAR;
+  }),
+  brown_mushroom: (t) => t.each((x, y) => {
+    if (y >= 10 && x >= 7 && x <= 8) return c(226, 214, 190);
+    if (y >= 6 && y <= 9 && x >= 3 && x <= 12 && Math.abs(x - 7.5) <= 4.5 - (9 - y) * 0.7) return mul(c(150, 104, 70), t.jit(0.08));
+    return CLEAR;
+  }),
+  fern: (t) => t.each((x, y) => {
+    const frond = (x === 7 || x === 8) && y >= 3 || (y >= 4 && y % 2 === 0 && Math.abs(x - 7.5) <= (16 - y) * 0.45);
+    return frond ? mul(c(58, 132, 58), t.jit(0.12)) : CLEAR;
+  }),
+  sapling: (t) => t.each((x, y) => {
+    if (y >= 10 && (x === 7 || x === 8)) return c(110, 78, 44);
+    if (Math.hypot(x - 7.5, y - 6) < 4.6 && t.rng() < 0.85) return mul(c(72, 150, 60), t.jit(0.15));
+    return CLEAR;
+  }),
+  lantern_blue: (t) => lanternTile(t, c(200, 236, 255), c(70, 140, 230)),
+  lantern_paper: (t) => t.each((x, y) => {
+    if (y <= 1 || y >= 14) return x >= 5 && x <= 10 ? c(60, 40, 30) : CLEAR;
+    if (x < 3 || x > 12) return CLEAR;
+    const d = Math.min(1, Math.hypot(x - 7.5, y - 7.5) / 7);
+    return y % 3 === 0 ? c(200, 70, 90) : lerpC(c(255, 214, 220), c(240, 110, 140), d);
+  }),
+  terracotta: (t) => t.noise(c(170, 92, 62), 0.06),
+  mossy_cobblestone: (t) => t.each((x, y) => {
+    const stone = mul(c(124, 124, 124), (((x * 7 + y * 3) % 5 === 0) ? 0.7 : 1) * t.jit(0.12));
+    return t.rng() < 0.35 ? mul(c(84, 132, 64), t.jit(0.15)) : stone;
+  }),
+  quartz: (t) => { t.noise(c(236, 232, 224), 0.03); frame(t, c(214, 208, 198)); },
   water: (t) => t.each((x, y) => mul(c(52, 128, 205, 170), (Math.sin((x + y * 0.5) * 0.8) * 0.06 + 1) * t.jit(0.04))),
   hay_top: (t) => t.each((x, y) => mul(c(214, 178, 72), ((x + y) % 3 === 0 ? 0.85 : 1) * t.jit(0.08))),
   hay_side: (t) => t.each((_x, y) => (y === 4 || y === 11 ? c(150, 66, 40) : mul(c(214, 178, 72), (y % 2 ? 0.92 : 1) * t.jit(0.08)))),
@@ -176,6 +253,18 @@ const painters: Record<string, (t: Tile) => void> = {
     }
   },
 };
+
+function lanternTile(t: Tile, light: C, glowC: C) {
+  t.each((x, y) => {
+    if (y >= 13 && (x < 4 || x > 11)) return CLEAR;
+    if (x >= 3 && x <= 12 && y >= 2 && y <= 12) {
+      const d = Math.min(1, Math.hypot(x - 7.5, y - 7) / 6.5);
+      const k = lerpC(light, glowC, d);
+      return x === 7 || x === 8 ? mul(k, 0.55) : k;
+    }
+    return c(44, 40, 38);
+  });
+}
 
 function flower(t: Tile, petal: C, center: C) {
   t.each(() => CLEAR);

@@ -26,6 +26,23 @@ const PIVOT_HEIGHT = 1.55, SHOULDER = 0.45, TP_DISTANCE = 4.2, TRANSITION = 0.28
 const REPEAT_DELAY = 0.22, STALL_RADIUS = 3.6, SEND_INTERVAL = 1 / 15;
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+/** First empty cell along the view (within reach) where `held` may be placed, stopping at the first solid block. */
+function airPlacementCell(g: NonNullable<typeof world.grid>, origin: THREE.Vector3, dir: THREE.Vector3, eye: THREE.Vector3,
+  held: number, blockers: ReturnType<typeof playerAabb>[], start: number): [number, number, number] | null {
+  let last = '';
+  for (let d = start; d <= start + REACH + 1; d += 0.05) {
+    const x = Math.floor(origin.x + dir.x * d), y = Math.floor(origin.y + dir.y * d), z = Math.floor(origin.z + dir.z * d);
+    const key = `${x},${y},${z}`;
+    if (key === last) continue;
+    last = key;
+    const here = getBlock(g.get(x, y, z));
+    if (here?.targetable && !here.replaceable) return null;            // the view is blocked
+    if (!withinReach(eye.x, eye.y, eye.z, x, y, z, REACH)) continue;
+    if (evaluatePlacement(g, x, y, z, held, blockers) === 'ok') return [x, y, z];
+  }
+  return null;
+}
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /** Thin-box outline of a unit cube (WebGL lines are always 1 px, so edges are boxes). */
@@ -196,7 +213,14 @@ export function LocalPlayer() {
       place = resolvePlacementCell(g, hit.x, hit.y, hit.z, hit.nx, hit.ny, hit.nz);
       if (held === AIR || evaluatePlacement(g, place[0], place[1], place[2], held, blockers) !== 'ok') place = null;
     }
-    if (outline.current) { outline.current.visible = valid; if (valid) outline.current.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5); }
+    // Aiming past an edge into empty air (extending a bridge, a wall, a roof): use the first free cell along
+    // the view that touches a block on any side.
+    let airPlace = false;
+    if (!place && canAct && game.tool === 'block' && held !== AIR) {
+      place = airPlacementCell(g, origin, dir, eye, held, blockers, Math.max(0, minAlong));
+      airPlace = !!place;
+    }
+    if (outline.current) { outline.current.visible = valid && !airPlace; if (valid) outline.current.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5); }
     if (ghost.current) { ghost.current.visible = !!place; if (place) ghost.current.position.set(place[0] + 0.5, place[1] + 0.5, place[2] + 0.5); }
 
     // One button, one action: left click uses whatever is in hand (block → place, hammer → destroy).
@@ -221,7 +245,7 @@ export function LocalPlayer() {
       } else if (use && game.tool === 'block') {
         if (held === AIR) { if (explicit) game.showToast(`Slot ${game.selectedSlot + 1} is empty — press T to choose blocks`); }
         else if (!game.profile.owned.includes(held)) { if (explicit) game.showToast("You don't own this block yet"); }
-        else if (!valid) { if (explicit) game.showToast('Aim at a block to build on it'); }
+        else if (!valid && !place) { if (explicit) game.showToast('Build next to another block'); }
         else if (place) {
           g.set(place[0], place[1], place[2], held);
           blockPlace(place[0], place[1], place[2], held);

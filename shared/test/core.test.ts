@@ -62,8 +62,9 @@ test('raycast: hits the first targetable cell with the correct face normal and s
 
 test('placement rules', () => {
   const g = new BlockGrid(8, 8, 8);
-  g.set(2, 0, 2, stone);
+  g.set(2, 0, 2, stone); g.set(3, 0, 2, stone); g.set(4, 0, 4, stone);
   assert.equal(evaluatePlacement(g, 2, 1, 2, stone, []), 'ok');
+  assert.equal(evaluatePlacement(g, 6, 5, 6, stone, []), 'no_support', 'nothing next to it');
   assert.equal(evaluatePlacement(g, 2, 0, 2, stone, []), 'occupied');
   assert.equal(evaluatePlacement(g, 9, 0, 0, stone, []), 'out_of_bounds');
   assert.equal(evaluatePlacement(g, 2, 1, 2, AIR, []), 'not_placeable');

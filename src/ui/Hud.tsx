@@ -72,7 +72,6 @@ export function Hud() {
         <button onClick={() => togglePanel('build')}>🔨 Build <Keycap k="T" /></button>
         <button onClick={() => togglePanel('social')}>😊 Social <Keycap k="G" /></button>
         <button onClick={() => togglePanel('customize')}>👕 Style <Keycap k="C" /></button>
-        <button onClick={() => togglePanel('shop')}>🧱 Shop <Keycap k="B" /></button>
         <button onClick={() => togglePanel('pause')}>⚙️</button>
       </div>
       {playing && s.pointerLocked && <div className="crosshair" />}

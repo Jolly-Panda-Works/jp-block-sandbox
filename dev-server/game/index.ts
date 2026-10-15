@@ -147,6 +147,33 @@ const BLOCKS: readonly BlockDef[] = [
   def(32, 'spruce_log', 'Spruce Log', ['spruce_log_top', 'spruce_log_side', 'spruce_log_top']),
   def(33, 'spruce_leaves', 'Spruce Leaves', ['spruce_leaves'], { layer: 1 }),
   def(34, 'bamboo', 'Bamboo', ['bamboo'], plant({ replaceable: false })),
+  // Decoration (sold at the Decor stall)
+  def(35, 'bookshelf', 'Bookshelf', ['oak_planks', 'bookshelf_side', 'oak_planks'], { category: 'decor' }),
+  def(36, 'barrel', 'Barrel', ['barrel_top', 'barrel_side', 'barrel_top'], { category: 'decor' }),
+  def(37, 'crate', 'Crate', ['crate'], { category: 'decor' }),
+  def(38, 'pumpkin', 'Pumpkin', ['pumpkin_top', 'pumpkin_side', 'pumpkin_top'], { category: 'decor' }),
+  def(39, 'jack_o_lantern', "Jack-o'-Lantern", ['pumpkin_top', 'jack_face', 'pumpkin_top'], { category: 'decor' }),
+  def(40, 'melon', 'Melon', ['melon_top', 'melon_side', 'melon_top'], { category: 'decor' }),
+  def(41, 'checker_tiles', 'Checker Tiles', ['checker'], { category: 'decor' }),
+  def(42, 'teal_glass', 'Teal Glass', ['glass_teal'], { category: 'decor', layer: 2 }),
+  def(43, 'red_glass', 'Red Glass', ['glass_red'], { category: 'decor', layer: 2 }),
+  def(44, 'mushroom_block', 'Mushroom Block', ['mushroom_block'], { category: 'decor' }),
+  def(45, 'white_planks', 'White Wood', ['white_planks']),
+  def(46, 'rose', 'Rose', ['rose'], plant()),
+  def(47, 'pink_tulip', 'Pink Tulip', ['tulip_pink'], plant()),
+  def(48, 'blue_orchid', 'Blue Orchid', ['blue_orchid'], plant()),
+  def(49, 'sunflower', 'Sunflower', ['sunflower'], plant()),
+  def(50, 'red_mushroom', 'Red Mushroom', ['red_mushroom'], plant()),
+  def(51, 'brown_mushroom', 'Brown Mushroom', ['brown_mushroom'], plant()),
+  def(52, 'fern', 'Fern', ['fern'], plant()),
+  def(53, 'sapling', 'Sapling', ['sapling'], plant()),
+  def(54, 'dark_fence', 'Dark Fence', ['dark_planks'], { category: 'decor', shape: 'fence' }),
+  def(55, 'stone_wall', 'Stone Wall', ['cobblestone'], { category: 'decor', shape: 'fence' }),
+  def(56, 'blue_lantern', 'Blue Lantern', ['lantern_blue'], { category: 'decor', shape: 'lantern', layer: 3, solid: false }),
+  def(57, 'paper_lantern', 'Paper Lantern', ['lantern_paper'], { category: 'decor', shape: 'lantern', layer: 3, solid: false }),
+  def(58, 'terracotta', 'Terracotta', ['terracotta']),
+  def(59, 'mossy_cobblestone', 'Mossy Cobblestone', ['mossy_cobblestone']),
+  def(60, 'quartz', 'Quartz', ['quartz']),
 ];
 
 const byId: (BlockDef | undefined)[] = [];
@@ -280,7 +307,7 @@ function intersects(a: Aabb, b: Aabb, eps = 0.001): boolean {
     && a.minZ < b.maxZ - eps && a.maxZ > b.minZ + eps;
 }
 
-type PlacementResult = 'ok' | 'out_of_bounds' | 'occupied' | 'blocked_by_actor' | 'not_placeable' | 'not_owned' | 'out_of_range';
+type PlacementResult = 'ok' | 'out_of_bounds' | 'occupied' | 'blocked_by_actor' | 'not_placeable' | 'not_owned' | 'out_of_range' | 'no_support';
 type RemovalResult = 'ok' | 'out_of_bounds' | 'empty' | 'protected' | 'not_removable' | 'out_of_range';
 
 /** Replaceable blocks (plants) are replaced in place; otherwise the block goes beside the hit face. */
@@ -288,6 +315,23 @@ function resolvePlacementCell(grid: BlockGrid, hx: number, hy: number, hz: numbe
   const hit = getBlock(grid.get(hx, hy, hz));
   if (hit?.replaceable && !grid.isProtected(hx, hy, hz)) return [hx, hy, hz];
   return [hx + nx, hy + ny, hz + nz];
+}
+
+const NEIGHBOURS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as const;
+
+/**
+ * A block can be placed when at least ONE of its six neighbours (below, above or any side) is a block —
+ * nothing has to be underneath it. Plants and water don't count as support.
+ */
+function hasSupport(grid: BlockGrid, x: number, y: number, z: number): boolean {
+  for (const [dx, dy, dz] of NEIGHBOURS) {
+    if (!grid.inBounds(x + dx, y + dy, z + dz)) continue;
+    const id = grid.get(x + dx, y + dy, z + dz);
+    if (id === AIR) continue;
+    const def = getBlock(id);
+    if (def && !def.replaceable) return true;
+  }
+  return false;
 }
 
 function evaluatePlacement(grid: BlockGrid, x: number, y: number, z: number, id: number, blockers: readonly Aabb[]): PlacementResult {
@@ -303,6 +347,7 @@ function evaluatePlacement(grid: BlockGrid, x: number, y: number, z: number, id:
     const box = cellAabb(x, y, z);
     for (const b of blockers) if (intersects(box, b)) return 'blocked_by_actor';
   }
+  if (!hasSupport(grid, x, y, z)) return 'no_support';
   return 'ok';
 }
 
@@ -1921,6 +1966,8 @@ interface HubDeps {
 const INVITE_TTL_MS = 3 * 60_000;
 const RPS_REVEAL_MS = 2500;
 const RESULT_HOLD_MS = 2500;
+/** How close (m) to a stall's counter a player must be to buy there. */
+const STALL_RADIUS = 4.5;
 const SEAT_RADIUS = 0.95;
 const pickRandom = <T>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)];
 
@@ -3096,6 +3143,10 @@ export default class BlocksyRoom extends Room {
   private handleBuy(client: Client, m: ClientMessages['buy']): void {
     const p = this.players.get(client.sessionId);
     if (!p || !isObj(m) || !isInt(m.id) || this.hub.locked(client.sessionId)) return;
+    // Shops only work at their stall: blocks at the Blocks stall, decorations at the Decor stall.
+    const def = getBlock(m.id);
+    const atStall = !!def && this.layout.stalls.some((s) => s.category === def.category && Math.hypot(p.x - s.interact.x, p.z - s.interact.z) <= STALL_RADIUS);
+    if (!atStall) { client.send('profile', { profile: p.profile, result: 'not_at_stall' }); return; }
     const result = purchase(p.profile, m.id);
     client.send('profile', { profile: p.profile, result });
   }

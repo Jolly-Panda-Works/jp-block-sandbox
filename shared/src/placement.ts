@@ -18,7 +18,7 @@ export function intersects(a: Aabb, b: Aabb, eps = 0.001): boolean {
     && a.minZ < b.maxZ - eps && a.maxZ > b.minZ + eps;
 }
 
-export type PlacementResult = 'ok' | 'out_of_bounds' | 'occupied' | 'blocked_by_actor' | 'not_placeable' | 'not_owned' | 'out_of_range';
+export type PlacementResult = 'ok' | 'out_of_bounds' | 'occupied' | 'blocked_by_actor' | 'not_placeable' | 'not_owned' | 'out_of_range' | 'no_support';
 export type RemovalResult = 'ok' | 'out_of_bounds' | 'empty' | 'protected' | 'not_removable' | 'out_of_range';
 
 /** Replaceable blocks (plants) are replaced in place; otherwise the block goes beside the hit face. */
@@ -26,6 +26,23 @@ export function resolvePlacementCell(grid: BlockGrid, hx: number, hy: number, hz
   const hit = getBlock(grid.get(hx, hy, hz));
   if (hit?.replaceable && !grid.isProtected(hx, hy, hz)) return [hx, hy, hz];
   return [hx + nx, hy + ny, hz + nz];
+}
+
+const NEIGHBOURS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as const;
+
+/**
+ * A block can be placed when at least ONE of its six neighbours (below, above or any side) is a block —
+ * nothing has to be underneath it. Plants and water don't count as support.
+ */
+export function hasSupport(grid: BlockGrid, x: number, y: number, z: number): boolean {
+  for (const [dx, dy, dz] of NEIGHBOURS) {
+    if (!grid.inBounds(x + dx, y + dy, z + dz)) continue;
+    const id = grid.get(x + dx, y + dy, z + dz);
+    if (id === AIR) continue;
+    const def = getBlock(id);
+    if (def && !def.replaceable) return true;
+  }
+  return false;
 }
 
 export function evaluatePlacement(grid: BlockGrid, x: number, y: number, z: number, id: number, blockers: readonly Aabb[]): PlacementResult {
@@ -41,6 +58,7 @@ export function evaluatePlacement(grid: BlockGrid, x: number, y: number, z: numb
     const box = cellAabb(x, y, z);
     for (const b of blockers) if (intersects(box, b)) return 'blocked_by_actor';
   }
+  if (!hasSupport(grid, x, y, z)) return 'no_support';
   return 'ok';
 }
 

@@ -81,6 +81,7 @@ const REJECT_TEXT: Record<string, string> = {
   not_owned: "You don't own this block yet",
   out_of_bounds: "That's the edge of the world",
   busy: 'Not while you are in a mini-game',
+  no_support: 'Place it next to another block',
 };
 
 // ---------------- local profile cache ----------------
@@ -291,6 +292,7 @@ function attach(r: Room): void {
   });
   r.onMessage('profile', (m: ServerMessages['profile']) => {
     set({ profile: m.profile });
+    if ((m.result as string) === 'not_at_stall') get().showToast('Buy it at its stall in the market');
     if (m.result === 'purchased') { get().showToast('Unlocked — it is yours forever'); fx.coins(localBody.x, localBody.y + 0.8, localBody.z); }
   });
   r.onMessage('chat', (m: ServerMessages['chat']) => get().showBubble(m.sessionId, { text: m.text }));

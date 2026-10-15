@@ -198,6 +198,17 @@ Small blocky particles, all client-side and cosmetic. They can be switched off i
 | Water | Splashes when falling into the pond or the sea |
 | Night | Fireflies |
 
+### Building and shops
+
+- **Placement rule:** a block can be placed in any empty cell within reach that has **at least one block on one of its six sides**. It does not need anything underneath, so you can build bridges, overhangs and roofs. Floating blocks with no neighbour are refused, by the server too.
+- **Aiming into empty air:** you can aim past an edge into empty air. The ghost block shows the first free cell along your view that touches a block.
+- **The two shops:** the market has two stalls, and each is its own shop. A shop opens only when you press **E** at its stall, and closes when you walk away. The server only accepts a purchase at the matching stall.
+
+| Stall | Sells |
+|---|---|
+| 🧱 Blocks | Building blocks, incl. white wood, terracotta, mossy cobblestone, quartz |
+| 🌼 Decor | Workbench, chest, beehive, lanterns (incl. blue and paper), fences (wood, dark, stone wall), bookshelf, barrel, crate, pumpkin, jack-o'-lantern, melon, checker tiles, tinted glass, mushroom block, and plants: rose, tulip, orchid, sunflower, daisy, buttercup, mushrooms, fern, sapling, grass tuft, bamboo |
+
 ## Controls
 
 **Desktop:**
@@ -212,7 +223,7 @@ Small blocky particles, all client-side and cosmetic. They can be switched off i
 | Build menu: choose blocks | T |
 | Camera | V |
 | Interact | E |
-| Shop / Style / Social | B / C / G |
+| Shop (at a stall) / Style / Social | E / C / G |
 | Popup games (invite) / accept or watch | P / E |
 | Rock Paper Scissors pick | 1 / 2 / 3 or click |
 | Hints / Menu | H / Esc |
