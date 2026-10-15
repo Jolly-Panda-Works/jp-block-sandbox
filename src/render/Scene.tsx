@@ -6,12 +6,15 @@ import { BotSeats, GameCenterNpcs, LocalLabel, RemotePlayers, Shopkeepers } from
 import { GameTables } from './GameTables';
 import { Animals } from './Animals';
 import { Particles } from './Particles';
+import { CullUpdater, PerfGuard } from './PerfGuard';
 
 export function Scene() {
   const layout = useGame((s) => s.layout);
   if (!layout) return null;
   return (
     <>
+      <CullUpdater />
+      <PerfGuard />
       <Environment layout={layout} />
       <WorldMesh />
       <LocalPlayer />

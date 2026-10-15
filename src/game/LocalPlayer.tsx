@@ -359,7 +359,7 @@ export function LocalPlayer() {
 
   return (
     <>
-      <group ref={avatar}><Avatar appearance={appearance} anim={anim} heldBlock={held} hammer={tool === 'destroy'} /></group>
+      <group ref={avatar}><Avatar appearance={appearance} anim={anim} heldBlock={held} hammer={tool === 'destroy'} cull={false} /></group>
       <group ref={outline} visible={false}><Outline color={tool === 'destroy' ? '#ff7a59' : '#3fe6c8'} /></group>
       <mesh ref={ghost} visible={false} scale={0.98}>
         <boxGeometry />

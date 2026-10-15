@@ -3,6 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { skyAt, type IslandLayout } from '@jp/blocksy-shared';
 import { currentClock } from '../net/network';
+import { QUALITY, useGame } from '../state/store';
 import { createSignTexture, createWaterTexture } from './textures';
 import { localBody } from '../game/localState';
 
@@ -31,6 +32,19 @@ export function Environment({ layout }: { layout: IslandLayout }) {
     l.shadow.camera.layers.enable(1); // the hidden first-person body still casts a shadow
     return () => { scene.remove(l.target); };
   }, [scene, bg, fog]);
+
+  const quality = useGame((s) => s.quality);
+  useEffect(() => {
+    const l = sun.current;
+    if (!l) return;
+    const size = QUALITY[quality].shadowMap;
+    l.castShadow = size > 0;
+    if (size > 0 && l.shadow.mapSize.x !== size) {
+      l.shadow.mapSize.set(size, size);
+      l.shadow.map?.dispose();
+      (l.shadow as { map: unknown }).map = null;   // re-created at the new size
+    }
+  }, [quality]);
 
   useFrame(() => {
     const k = skyAt(currentClock().hour);

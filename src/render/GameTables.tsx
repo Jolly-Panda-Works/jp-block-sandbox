@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import type { MgListing, MiniGameKind } from '@jp/blocksy-shared';
 import { useGame } from '../state/store';
@@ -40,6 +40,7 @@ const DARK = new THREE.MeshLambertMaterial({ color: '#6e4a2a' });
 
 function Table({ g }: { g: MgListing }) {
   const top = useMemo(() => new THREE.MeshLambertMaterial({ map: boardTexture(g.kind) }), [g.kind]);
+  useEffect(() => () => { top.map?.dispose(); top.dispose(); }, [top]);
   return (
     <group>
       <group position={[g.x, g.y, g.z]}>

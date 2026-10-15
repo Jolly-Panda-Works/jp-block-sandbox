@@ -6,6 +6,9 @@ import * as THREE from 'three';
 import { AIR, HAND_ANCHOR, JOINTS, MODEL_SCALE, buildAvatarParts, type Appearance, type AvatarPart, type Joint } from '@jp/blocksy-shared';
 import { getBlockGeometry, getBlockMaterials } from './textures';
 import { now, type AnimState, gaitFor } from './animState';
+import { inView } from './cull';
+
+const tmpPos = new THREE.Vector3();
 
 const BOX = new THREE.BoxGeometry(1, 1, 1);
 const materialCache = new Map<string, THREE.MeshLambertMaterial>();
@@ -40,13 +43,16 @@ function Part({ p }: { p: AvatarPart }) {
   return <mesh geometry={BOX} material={material(p.color)} position={p.pos} scale={p.size} rotation={p.rot ?? [0, 0, 0]} castShadow receiveShadow />;
 }
 
-interface Props { appearance: Appearance; anim: AnimState; heldBlock?: number; hammer?: boolean }
+interface Props { appearance: Appearance; anim: AnimState; heldBlock?: number; hammer?: boolean
+  /** Skip drawing and animating while off-screen (not for the player's own character). */
+  cull?: boolean;
+}
 
 /**
  * Blocky character built from {@link buildAvatarParts} with procedural animation:
  * walk cycle, idle sway, airborne pose, use-swing and the Happy / Cry / Wave emotes.
  */
-export function Avatar({ appearance, anim, heldBlock = AIR, hammer = false }: Props) {
+export function Avatar({ appearance, anim, heldBlock = AIR, hammer = false, cull: cullable = true }: Props) {
   const parts = useMemo(() => buildAvatarParts(appearance), [appearance]);
   const by = (j: Joint): ReactNode => parts.filter((p) => p.joint === j).map((p, i) => <Part key={`${j}${i}`} p={p} />);
   const offset = useRef<THREE.Group>(null);
@@ -57,6 +63,13 @@ export function Avatar({ appearance, anim, heldBlock = AIR, hammer = false }: Pr
   const heldGeo = heldBlock !== AIR ? getBlockGeometry(heldBlock) : null;
 
   useFrame((_, rawDt) => {
+    const root = offset.current;
+    if (cullable && root) {
+      root.getWorldPosition(tmpPos);
+      const show = inView(tmpPos.x, tmpPos.y, tmpPos.z);
+      root.visible = show;
+      if (!show) return;                       // off-screen: no animation work at all
+    }
     const dt = Math.min(rawDt, 0.05), t = now();
     const s = st.current;
     // Walk cycle tied to how fast the character really moves: the swing angle and the step rate go together,

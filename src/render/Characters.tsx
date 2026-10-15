@@ -6,6 +6,7 @@ import { AIR, createRng, hashString, isBotId, miniGameInfo, randomAppearance, ty
 import { Avatar } from './Avatar';
 import { applyGamePose, getAnim, now, playEmote } from './animState';
 import { footstep, land, notes } from './particleFx';
+import { inView } from './cull';
 import { remotes } from '../net/network';
 import { useGame, type PlayerMeta } from '../state/store';
 import { localBody } from '../game/localState';
@@ -63,7 +64,7 @@ function RemotePlayer({ id, meta }: { id: string; meta: PlayerMeta }) {
       f.zzz = now() + 2.2;
       notes(r.rx, r.ry + 0.6, r.rz, '#cfe3ff');                   // 💤
     }
-    if (Math.hypot(r.rx - localBody.x, r.rz - localBody.z) < 30) {
+    if (Math.hypot(r.rx - localBody.x, r.rz - localBody.z) < 30 && inView(r.rx, r.ry, r.rz)) {
       if (!r.grounded) f.airTime += dt;
       else if (!f.grounded && f.airTime > 0.45) land(r.rx, r.ry, r.rz, Math.min(1, (f.airTime - 0.45) * 1.2));
       if (r.grounded) f.airTime = 0;

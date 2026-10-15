@@ -14,7 +14,7 @@ import { RPS_CHOICES } from '@jp/blocksy-shared';
 import { PauseMenu } from './ui/PauseMenu';
 import { clearHeld, installInput, setKeyboardEnabled } from './game/input';
 import { lockPointer, takeSuppressPause, togglePanel } from './game/pointer';
-import { useGame } from './state/store';
+import { QUALITY, useGame } from './state/store';
 
 function onKey(code: string): void {
   const s = useGame.getState();
@@ -55,6 +55,7 @@ function onKey(code: string): void {
 const SMALL_SCREEN = '(max-width: 900px), (max-height: 520px)';
 
 export function App() {
+  const quality = useGame((st) => st.quality);
   const phase = useGame((s) => s.phase);
   const panel = useGame((s) => s.panel);
   const isTouch = useGame((s) => s.touch);
@@ -94,7 +95,7 @@ export function App() {
   return (
     <div className="rotator">
     <div className={`app ${isTouch ? 'touch' : ''}`}>
-      <Canvas className="game" shadows flat dpr={[1, 2]} camera={{ fov: 72, near: 0.05, far: 600 }} gl={{ antialias: true }}
+      <Canvas className="game" shadows flat dpr={QUALITY[quality].dpr} camera={{ fov: 72, near: 0.05, far: 600 }} gl={{ antialias: true }}
         onPointerDown={() => { if (useGame.getState().panel === 'none') lockPointer(); }}>
         <Scene />
       </Canvas>

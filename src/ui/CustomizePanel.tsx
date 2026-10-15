@@ -34,7 +34,7 @@ function Turntable({ appearance }: { appearance: Appearance }) {
   const anim = getAnim('preview');
   useEffect(() => { playEmote('preview', 'wave'); }, []);
   useFrame((_, dt) => { if (g.current) g.current.rotation.y += dt * 0.6; });
-  return <group ref={g} position={[0, -0.95, 0]}><Avatar appearance={appearance} anim={anim} /></group>;
+  return <group ref={g} position={[0, -0.95, 0]}><Avatar appearance={appearance} anim={anim} cull={false} /></group>;
 }
 
 /** Character customisation: model + colour per clothing slot, skin, and hat / glasses / watch accessories. */

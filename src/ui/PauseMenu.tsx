@@ -1,7 +1,7 @@
 import { asset } from '../assets';
 import { useState } from 'react';
 import { MAX_NAME_LENGTH, sanitizeName } from '@jp/blocksy-shared';
-import { saveName, useGame } from '../state/store';
+import { saveName, setQuality, useGame } from '../state/store';
 import { send } from '../net/network';
 import { platform } from '../net/platform';
 import { inviteLink } from '../net/config';
@@ -16,7 +16,7 @@ const CONTROLS: [string, string][] = [
 ];
 
 export function PauseMenu() {
-  const { sensitivity, invertY, multiplayerId, showToast, name, particles, camDistance, cameraMode } = useGame();
+  const { sensitivity, invertY, multiplayerId, showToast, name, particles, camDistance, cameraMode, quality } = useGame();
   const setCamDistance = (v: number) => {
     const d = Math.min(8, Math.max(2, Math.round(v * 2) / 2));
     useGame.setState({ camDistance: d });
@@ -59,6 +59,12 @@ export function PauseMenu() {
           <span>Particles</span>
           <input type="checkbox" checked={particles} onChange={(e) => setParticles(e.target.checked)} />
         </label>
+        <div className="setting">
+          <span>Graphics</span>
+          {(['low', 'medium', 'high'] as const).map((q) => (
+            <button key={q} className={quality === q ? 'primary' : ''} onClick={() => setQuality(q)}>{q === 'low' ? 'Low' : q === 'medium' ? 'Medium' : 'High'}</button>
+          ))}
+        </div>
         <div className="setting">
           <span>Camera</span>
           {(['first', 'third', 'free'] as const).map((m) => (

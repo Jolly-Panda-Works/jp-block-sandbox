@@ -6,6 +6,18 @@ import {
 
 export type Panel = 'none' | 'pause' | 'shop' | 'customize' | 'social' | 'build' | 'games';
 /** first / third person, or a free camera that flies around on its own (the player stays put). */
+export type Quality = 'low' | 'medium' | 'high';
+/** What each graphics quality level uses. */
+export const QUALITY = {
+  low: { dpr: [1, 1] as [number, number], shadowMap: 0, viewDistance: 45, particles: 0.4 },
+  medium: { dpr: [1, 1.5] as [number, number], shadowMap: 1024, viewDistance: 75, particles: 1 },
+  high: { dpr: [1, 2] as [number, number], shadowMap: 2048, viewDistance: 110, particles: 1 },
+} as const;
+export function setQuality(q: Quality): void {
+  useGame.setState({ quality: q });
+  try { localStorage.setItem('blocksy.quality', q); } catch { /* private mode */ }
+}
+
 export type CameraMode = 'first' | 'third' | 'free';
 
 export interface PlayerMeta { name: string; appearance: Appearance; isLocal: boolean }
@@ -66,6 +78,8 @@ interface GameState {
   camDistance: number;
   /** My resting pose (sit on the ground / lie down); moving stands up. */
   myPose: '' | 'sit' | 'sleep';
+  /** Graphics quality (resolution, shadows, view distance, particles); saved on this device. */
+  quality: Quality;
   invertY: boolean;
 
   setPanel: (p: Panel) => void;
@@ -129,6 +143,10 @@ export const useGame = create<GameState>()((set, get) => ({
   nearbyStall: null,
   sensitivity: 1,
   myPose: '',
+  quality: (() => {
+    try { const q = localStorage.getItem('blocksy.quality'); if (q === 'low' || q === 'medium' || q === 'high') return q; } catch { /* private mode */ }
+    return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches ? 'low' : 'medium';
+  })(),
   camDistance: (() => { try { const v = Number(localStorage.getItem('blocksy.camDistance')); return v >= 2 && v <= 8 ? v : 4; } catch { return 4; } })(),
   particles: (() => { try { return localStorage.getItem('blocksy.particles') !== 'off'; } catch { return true; } })(),
   invertY: false,

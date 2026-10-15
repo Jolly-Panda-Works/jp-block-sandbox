@@ -40,7 +40,13 @@ export function WorldMesh() {
         root.add(mesh);
       }
       mesh.visible = data.indices.length > 0;
-      if (mesh.visible) applyMeshData(mesh.geometry, data);
+      // Fresh geometry each rebuild and dispose the old one: replacing attributes on the same geometry
+      // left the old GPU buffers allocated (memory grew with every block edit until the browser crashed).
+      const old = mesh.geometry;
+      const geo = new THREE.BufferGeometry();
+      if (mesh.visible) applyMeshData(geo, data);
+      mesh.geometry = geo;
+      old.dispose();
     }
   });
 

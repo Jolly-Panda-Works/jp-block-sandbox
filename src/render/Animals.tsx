@@ -6,6 +6,8 @@ import { isAnimalKind, variantColors, type AnimalColors, type AnimalKind } from 
 import { useGame } from '../state/store';
 import { animalStates } from '../net/network';
 import { now } from './animState';
+import { inView } from './cull';
+import { mergeBoxArrays } from './mergeBoxes';
 import { isNight } from '@jp/blocksy-shared';
 import { currentClock } from '../net/network';
 
@@ -127,6 +129,29 @@ const mat = (c: string) => {
   return m;
 };
 const BOX = new THREE.BoxGeometry(1, 1, 1);
+const BODY_MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
+const bodies = new Map<string, THREE.BufferGeometry>();
+/** The animal's whole body (everything except legs and wings) as ONE mesh, cached per kind + colour. */
+function bodyGeometry(kind: AnimalKind, variant: string): THREE.BufferGeometry {
+  const key = `${kind}:${variant}`;
+  let g = bodies.get(key);
+  if (g) return g;
+  const pal = variantColors(kind, variant);
+  const c = new THREE.Color();
+  const boxes = MODELS[kind].boxes.filter((b) => b.leg === undefined && !b.wing).map((b) => {
+    c.set(colorOf(b.c, pal)).convertSRGBToLinear();
+    return { p: b.p, s: b.s, rx: b.rx, color: [c.r, c.g, c.b] as [number, number, number] };
+  });
+  const d = mergeBoxArrays(boxes);
+  g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(d.positions, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(d.normals, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(d.colors, 3));
+  g.setIndex(new THREE.BufferAttribute(d.indices, 1));
+  g.computeBoundingSphere();
+  bodies.set(key, g);
+  return g;
+}
 const colorOf = (c: string, pal: AnimalColors) => (c === 'M' ? pal.main : c === 'A' ? pal.accent : c === 'D' ? pal.detail : c);
 
 function AnimalBubble({ id }: { id: string }) {
@@ -159,6 +184,9 @@ function Animal({ id, kind, variant }: { id: string; kind: AnimalKind; variant: 
     a.ryaw += Math.atan2(Math.sin(a.yaw - a.ryaw), Math.cos(a.yaw - a.ryaw)) * k;
     grp.position.set(a.rx, a.ry, a.rz);
     grp.rotation.y = a.ryaw;
+    const show = inView(a.rx, a.ry, a.rz, 1.2);
+    grp.visible = show;
+    if (!show) return;                         // off-screen: position kept up to date, nothing else
     // Legs move with the speed you actually see (smoothed position), one step per leg length.
     const gs = gait.current;
     const moved = gs.init ? Math.hypot(a.rx - gs.px, a.rz - gs.pz) : 0;
@@ -192,6 +220,7 @@ function Animal({ id, kind, variant }: { id: string; kind: AnimalKind; variant: 
   return (
     <group ref={g}>
       <group ref={body}>
+        <mesh geometry={bodyGeometry(kind, variant)} material={BODY_MAT} castShadow />
         {model.boxes.map((b, i) => {
           const m = mat(colorOf(b.c, pal));
           if (b.leg !== undefined) {
@@ -206,7 +235,7 @@ function Animal({ id, kind, variant }: { id: string; kind: AnimalKind; variant: 
             const idx = wi++;
             return <mesh key={i} ref={(el) => { wings.current[idx] = el; }} geometry={BOX} material={m} position={b.p} scale={b.s} castShadow={!fly} />;
           }
-          return <mesh key={i} geometry={BOX} material={m} position={b.p} scale={b.s} rotation={[b.rx ?? 0, 0, 0]} castShadow />;
+          return null; // part of the merged body mesh
         })}
       </group>
       <AnimalBubble id={id} />
