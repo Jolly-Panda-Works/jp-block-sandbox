@@ -6,6 +6,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import * as colyseusNs from 'colyseus';
 import type { Client as ColyseusClient, Delayed as ColyseusDelayed } from 'colyseus';
+import { matches } from './mockBackend';
 
 // Colyseus may be loaded as CommonJS; take the classes from `.default` when needed.
 const colyseus = ((colyseusNs as unknown as { default?: typeof colyseusNs }).default ?? colyseusNs) as typeof colyseusNs;
@@ -14,17 +15,18 @@ export const Room = colyseus.Room;
 export type Client = ColyseusClient;
 export type Delayed = ColyseusDelayed;
 
-/** Local tokens look like "dev:<browser id>". Anything else is refused, like a bad token on the platform. */
+/** Local tokens look like "dev:<userId>:<matchId>" (issued by mockBackend.ts). Anything else is refused. */
 export async function authorizeJoin(options: Record<string, unknown>): Promise<{ userId: string; multiplayerId: string }> {
   const jwt = typeof options?.jwt === 'string' ? options.jwt : '';
-  const m = /^dev:([A-Za-z0-9-]{4,64})$/.exec(jwt);
-  if (!m) throw new Error('Local dev server: expected a "dev:<id>" token (run the client with npm run dev).');
-  const multiplayerId = typeof options.multiplayerId === 'string' && options.multiplayerId ? options.multiplayerId : 'public';
-  return { userId: `dev-${m[1]}`, multiplayerId };
+  const m = /^dev:([0-9a-f-]{36}):([0-9a-f-]{36})$/i.exec(jwt);
+  if (!m) throw new Error('jwt malformed');
+  if (options.multiplayerId !== m[2]) throw new Error('multiplayerId does not match the token');
+  return { userId: m[1], multiplayerId: m[2] };
 }
 
-export async function fetchRoomConfig(_multiplayerId: string, _roomName: string) {
-  return { minPlayers: 1, maxPlayers: 8, countdownMs: 0, durationMs: 0 };
+export async function fetchRoomConfig(multiplayerId: string, _roomName: string) {
+  const match = matches.get(multiplayerId);
+  return { minPlayers: 1, maxPlayers: match?.maxPlayers ?? 8, countdownMs: 0, durationMs: 0 };
 }
 
 /** Custom settings: dev-server/settings.json (same JSON as the dashboard's Custom settings box). */

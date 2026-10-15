@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Scene } from './render/Scene';
 import { Hud } from './ui/Hud';
-import { JoinScreen } from './ui/JoinScreen';
+import { Entry } from './ui/Entry';
 import { ShopPanel } from './ui/ShopPanel';
 import { CustomizePanel } from './ui/CustomizePanel';
 import { SocialPanel } from './ui/SocialPanel';
@@ -70,7 +70,7 @@ export function App() {
     return () => document.removeEventListener('pointerlockchange', change);
   }, []);
 
-  if (phase !== 'playing') return <JoinScreen />;
+  if (phase !== 'playing') return <Entry />;
 
   return (
     <div className={`app ${isTouch ? 'touch' : ''}`}>

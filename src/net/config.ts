@@ -29,7 +29,7 @@ export const config = {
   /** Game key on the platform (= Colyseus room name). */
   roomName: env.VITE_ROOM_NAME || 'blocksy',
   /** The backend's match id (UUID). Players with the same id play together. */
-  multiplayerId: query.get('multiplayerId') ?? env.VITE_MULTIPLAYER_ID ?? '',
+  multiplayerId: query.get('room') ?? query.get('multiplayerId') ?? env.VITE_MULTIPLAYER_ID ?? '',
   apiAuth: (env.VITE_API_AUTH === 'bearer' ? 'bearer' : 'cookie') as 'cookie' | 'bearer',
   /** Realtime JWT handed over directly by the Rastaar app (skips the backend call). */
   jwt: takeSecret('jwt'),
@@ -37,8 +37,6 @@ export const config = {
   userToken: takeSecret('token'),
   username: query.get('username') ?? '',
   avatarUrl: query.get('avatarUrl') ?? '',
-  /** Local dev server mode (.env.development): "dev:<id>" tokens instead of the backend. */
-  localDev: env.VITE_LOCAL_DEV === 'true' && import.meta.env.DEV === true,
 } as const;
 
 /**
@@ -50,7 +48,7 @@ export function parseMatchInput(raw: string): { multiplayerId: string; jwt: stri
   if (!text) return { multiplayerId: '', jwt: '' };
   try {
     const url = new URL(text);
-    return { multiplayerId: url.searchParams.get('multiplayerId') ?? '', jwt: url.searchParams.get('jwt') ?? '' };
+    return { multiplayerId: url.searchParams.get('room') ?? url.searchParams.get('multiplayerId') ?? '', jwt: url.searchParams.get('jwt') ?? '' };
   } catch {
     const m = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(text);
     return { multiplayerId: m ? m[0] : text, jwt: '' };
@@ -62,6 +60,6 @@ export function inviteLink(multiplayerId: string): string {
   const url = new URL(location.href);
   url.search = '';
   url.hash = '';
-  url.searchParams.set('multiplayerId', multiplayerId);
+  url.searchParams.set('room', multiplayerId);
   return url.toString();
 }

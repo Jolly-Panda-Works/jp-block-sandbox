@@ -216,3 +216,31 @@ input:focus { border-color: var(--accent); }
 .join-advanced small { color: var(--sub); font-size: 12px; }
 button.link { background: transparent; color: var(--accent); padding: 2px; font-weight: 700; text-decoration: underline; }
 button.link:hover { background: transparent; color: #7ff3da; }
+
+/* Entry: sign-in and lobby */
+.join-card.wide { width: min(720px, 94vw); max-height: 92vh; overflow: auto; text-align: left; }
+.join-card.wide .brand { justify-content: flex-start; }
+.join-card.wide .brand-icon { width: 56px; height: 56px; }
+.join-card.wide .brand-word { height: 40px; }
+.entry-form { display: flex; flex-direction: column; gap: 10px; }
+.entry-form small, .muted { color: var(--sub); font-size: 12px; }
+.lobby { display: flex; flex-direction: column; gap: 14px; }
+.lobby section { display: flex; flex-direction: column; gap: 8px; }
+.lobby h3 { margin: 4px 0 0; font-size: 16px; display: flex; align-items: center; gap: 10px; }
+.lobby-top { display: flex; gap: 10px; align-items: center; }
+.lobby-top input { flex: 1; }
+.row-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.row-form input { flex: 1; min-width: 160px; }
+select { font: inherit; color: var(--text); background: rgba(0, 0, 0, 0.35); border: 0; border-radius: 10px; padding: 10px; }
+.room-list { display: flex; flex-direction: column; gap: 8px; max-height: 40vh; overflow: auto; padding: 2px; }
+.room-card { display: flex; align-items: center; gap: 12px; background: var(--tile); border-radius: 12px; padding: 10px 12px; }
+.room-card.full { opacity: 0.6; }
+.room-main { flex: 1; min-width: 0; }
+.room-name { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.room-id { font-size: 11px; color: var(--sub); font-family: ui-monospace, monospace; }
+.room-count { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.room-count .dots { display: flex; gap: 3px; }
+.room-count .dots i { width: 8px; height: 8px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); }
+.room-count .dots i.on { background: var(--accent); }
+.created { display: flex; flex-direction: column; gap: 8px; background: rgba(61, 219, 185, 0.12); border: 1px solid var(--accent-dark); border-radius: 12px; padding: 12px; }
+.room-full-id { font-family: ui-monospace, monospace; background: rgba(0, 0, 0, 0.35); padding: 8px; border-radius: 8px; user-select: all; word-break: break-all; }

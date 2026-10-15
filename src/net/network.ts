@@ -1,6 +1,6 @@
 import { Client, type Room } from 'colyseus.js';
 import {
-  AIR, DEFAULT_MULTIPLAYER_ID, EMOJIS, PROTOCOL_VERSION, getBlock, sanitizeAppearance, sanitizeMultiplayerId, sanitizeProfile,
+  AIR, EMOJIS, PROTOCOL_VERSION, getBlock, sanitizeAppearance, sanitizeProfile,
   type ClientMessages, type JoinOptions, type PlayerMeta, type PlayerSnapshot, type ProfileData, type ServerMessages,
 } from '@jp/blocksy-shared';
 import { useGame } from '../state/store';
@@ -90,7 +90,7 @@ export async function connect(name: string, input: JoinInput = {}): Promise<void
   let requested = (input.multiplayerId || config.multiplayerId).trim();
 
   // A game token alone is enough: the match id is its "mid" claim.
-  if (directJwt && !config.localDev) {
+  if (directJwt) {
     const claims = readGameToken(directJwt);
     if (!claims) {
       set({ phase: 'error', error: "That isn't a Rastaar game token. Copy the whole token (it has two dots: xxxxx.yyyyy.zzzzz)." });
@@ -109,10 +109,10 @@ export async function connect(name: string, input: JoinInput = {}): Promise<void
       requested = claims.mid;
     }
   }
-  const multiplayerId = config.localDev ? sanitizeMultiplayerId(requested, DEFAULT_MULTIPLAYER_ID) : requested;
+  const multiplayerId = requested;
   let wsUrl = config.wsUrl;
-  if (!config.localDev && !UUID_RE.test(multiplayerId)) {
-    set({ phase: 'error', error: multiplayerId ? 'That match code is not valid (it should look like 123e4567-e89b-12d3-a456-426614174000).' : 'Enter a match code, or open Blocksy from the Rastaar app / an invite link.' });
+  if (!UUID_RE.test(multiplayerId)) {
+    set({ phase: 'error', error: multiplayerId ? 'That match code is not valid (it should look like 123e4567-e89b-12d3-a456-426614174000).' : 'Choose a room first.' });
     return;
   }
   set({ multiplayerId });

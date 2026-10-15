@@ -33,9 +33,15 @@ jobs:
         run: npm run build:pages
         env:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
-          VITE_API_AUTH: ${{ vars.VITE_API_AUTH || 'cookie' }}
+          VITE_API_AUTH: ${{ vars.VITE_API_AUTH || 'bearer' }}
           VITE_WS_URL: ${{ vars.VITE_WS_URL || 'wss://gameserver.rastar.ir' }}
           VITE_ROOM_NAME: ${{ vars.VITE_ROOM_NAME || 'blocksy' }}
+          VITE_TOKEN_PATH: ${{ vars.VITE_TOKEN_PATH }}
+          VITE_AUTH_OTP_SEND_PATH: ${{ vars.VITE_AUTH_OTP_SEND_PATH }}
+          VITE_AUTH_OTP_VERIFY_PATH: ${{ vars.VITE_AUTH_OTP_VERIFY_PATH }}
+          VITE_ME_PATH: ${{ vars.VITE_ME_PATH }}
+          VITE_ROOMS_PATH: ${{ vars.VITE_ROOMS_PATH }}
+          VITE_ROOM_PATH: ${{ vars.VITE_ROOM_PATH }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

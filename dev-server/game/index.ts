@@ -951,6 +951,7 @@ export default class BlocksyRoom extends Room {
       lastMove: Date.now(),
     };
     this.players.set(client.sessionId, p);
+    this.publishMetadata();
     if (!this.participants.has(auth.userId)) this.participants.set(auth.userId, { userId: auth.userId, placed: 0 });
 
     client.send('welcome', { sessionId: client.sessionId, userId: auth.userId });
@@ -977,6 +978,7 @@ export default class BlocksyRoom extends Room {
     }
     this.players.delete(client.sessionId);
     this.buckets.delete(client.sessionId);
+    this.publishMetadata();
     this.broadcast('playerLeft', { id: client.sessionId });
   }
 
@@ -1029,6 +1031,11 @@ export default class BlocksyRoom extends Room {
       }
     }
     if (reason === 'time') this.clock.setTimeout(() => { void this.disconnect(); }, 5000);
+  }
+
+  /** Public room listing info (match id + live player count) for the platform's matchmaker. */
+  private publishMetadata(): void {
+    void this.setMetadata({ multiplayerId: this.multiplayerId, players: this.players.size, maxPlayers: this.maxClients });
   }
 
   // ---------------- rate limiting ----------------

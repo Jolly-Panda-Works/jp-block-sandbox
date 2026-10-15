@@ -1,30 +1,13 @@
 import { config } from './config';
+import { authToken } from './platform';
 
 /** What the game needs to join the realtime server. */
 export interface RealtimeCredentials { wsUrl: string; jwt?: string }
 
-/** Stable per-browser id for the local dev server's "dev:<id>" tokens. */
-function localDevId(): string {
-  try {
-    let id = localStorage.getItem('blocksy.devId');
-    if (!id) {
-      id = (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`).replace(/[^A-Za-z0-9-]/g, '');
-      localStorage.setItem('blocksy.devId', id);
-    }
-    return id;
-  } catch {
-    return `${Date.now()}`;
-  }
-}
-
 /** Bearer token for the backend: from ?token=... (stored for next time) or localStorage. */
 function bearerToken(): string | null {
-  try {
-    if (config.userToken) localStorage.setItem('blocksy.authToken', config.userToken);
-    return config.userToken || localStorage.getItem('blocksy.authToken');
-  } catch {
-    return config.userToken || null;
-  }
+  if (config.userToken) authToken.set(config.userToken);
+  return config.userToken || authToken.get();
 }
 
 /**
@@ -36,9 +19,8 @@ function bearerToken(): string | null {
 export async function getRealtimeCredentials(multiplayerId: string, jwtOverride = ''): Promise<RealtimeCredentials> {
   const direct = jwtOverride || config.jwt;
   if (direct) return { wsUrl: config.wsUrl, jwt: direct };
-  if (!config.apiBaseUrl && config.localDev) return { wsUrl: config.wsUrl, jwt: `dev:${localDevId()}` };
   if (!config.apiBaseUrl) {
-    throw new Error('No game token for this match. Paste your game token (JWT) on the join screen, or open Blocksy from the Rastaar app.');
+    throw new Error('Sign in to play (this site is not connected to the Rastaar backend).');
   }
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' };
@@ -57,7 +39,9 @@ export async function getRealtimeCredentials(multiplayerId: string, jwtOverride 
   } catch {
     throw new Error(`Could not reach the game backend (${config.apiBaseUrl}).`);
   }
-  if (res.status === 401 || res.status === 403) throw new Error('Please sign in to play (backend refused the token request).');
+  if (res.status === 401) { authToken.clear(); throw new Error('Please sign in again.'); }
+  if (res.status === 403) throw new Error('You are not allowed to join this room.');
+  if (res.status === 404) throw new Error('This room no longer exists.');
   if (!res.ok) throw new Error(`Backend error ${res.status} while requesting a realtime token.`);
 
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
