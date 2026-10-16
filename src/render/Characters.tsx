@@ -7,6 +7,7 @@ import { Avatar } from './Avatar';
 import { applyGamePose, getAnim, now, playEmote } from './animState';
 import { footstep, land, notes } from './particleFx';
 import { inView } from './cull';
+import { useLabelVisibility } from './labelVisibility';
 import { remotes } from '../net/network';
 import { useGame, type PlayerMeta } from '../state/store';
 import { localBody } from '../game/localState';
@@ -23,14 +24,19 @@ export function Label({ id, name, isYou, invite }: { id: string; name: string; i
     return () => clearTimeout(h);
   }, [bubble]);
   const visible = bubble && bubble.until > now();
+  const anchor = useRef<THREE.Group>(null);
+  const box = useRef<HTMLDivElement>(null);
+  useLabelVisibility(anchor, box);   // only when close, and not through walls / trees
   return (
-    <Html position={[0, 2.15, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
-      <div className="label">
+    <group ref={anchor} position={[0, 2.15, 0]}>
+    <Html center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
+      <div className="label" ref={box}>
         {visible && <div className={`bubble ${bubble?.emoji ? 'emoji' : ''}`}>{bubble?.emoji ?? bubble?.text}</div>}
         {invite && <div className="invite-badge" title={miniGameInfo(invite).name}>{miniGameInfo(invite).icon}<span>{miniGameInfo(invite).name}</span></div>}
         <div className={`nametag ${isYou ? 'you' : ''}`}><span className="dot" />{name}</div>
       </div>
     </Html>
+    </group>
   );
 }
 

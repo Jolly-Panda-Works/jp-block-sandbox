@@ -194,3 +194,15 @@ test('decor catalogue: many decorative items, every tile painted', () => {
   assert.ok(decor.length >= 28, `decor items: ${decor.length}`);
   for (const b of ALL_BLOCKS) for (const tile of [b.top, b.side, b.bottom]) assert.ok((ALL_TILES as readonly string[]).includes(tile), `${b.key} uses unknown tile ${tile}`);
 });
+
+import { EMOJIS, isEmojiId } from '../src/index';
+
+test('emoji: all faces and hands, unique ids, the six original ids still valid', () => {
+  assert.ok(EMOJIS.filter((e) => e.group === 'faces').length >= 90);
+  assert.ok(EMOJIS.filter((e) => e.group === 'hands').length >= 30);
+  assert.equal(new Set(EMOJIS.map((e) => e.id)).size, EMOJIS.length, 'unique ids');
+  assert.equal(new Set(EMOJIS.map((e) => e.char)).size, EMOJIS.length, 'no duplicates');
+  for (const id of ['smile', 'heart', 'thumbs', 'laugh', 'wow', 'wave']) assert.ok(isEmojiId(id));
+  assert.ok(!EMOJIS.some((e) => e.char === '🖕'), 'no offensive gestures');
+  assert.ok(isEmojiId('u1f600') && !isEmojiId('u1f595') && !isEmojiId('<script>'));
+});

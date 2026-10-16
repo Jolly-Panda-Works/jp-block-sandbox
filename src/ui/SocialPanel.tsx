@@ -7,6 +7,29 @@ import { openPanel } from '../game/pointer';
 type Tab = 'emojis' | 'messages' | 'emotes';
 
 /** Social panel (reference images 9–11): emoji and text bubbles above your head, and animated emotes. */
+const drawable = new Map<string, boolean>();
+/**
+ * Can this device's emoji font draw the emoji? Newer emoji show up as empty boxes on older systems
+ * (e.g. Windows 10), so those are left out of the picker. Colour pixels in a tiny canvas = drawn.
+ */
+function canDrawEmoji(ch: string): boolean {
+  let ok = drawable.get(ch);
+  if (ok !== undefined) return ok;
+  try {
+    const c = document.createElement('canvas');
+    c.width = c.height = 20;
+    const g = c.getContext('2d', { willReadFrequently: true })!;
+    g.textBaseline = 'top';
+    g.font = '16px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';
+    g.fillText(ch, 0, 0);
+    const d = g.getImageData(0, 0, 20, 20).data;
+    ok = false;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 0 && (Math.abs(d[i] - d[i + 1]) > 20 || Math.abs(d[i + 1] - d[i + 2]) > 20)) { ok = true; break; }
+  } catch { ok = true; }
+  drawable.set(ch, ok);
+  return ok;
+}
+
 export function SocialPanel() {
   const seated = useGame((s) => s.mg?.role === 'player');
   const mgActive = useGame((s) => s.mg || s.lobby);
@@ -32,8 +55,17 @@ export function SocialPanel() {
         </div>
         <div className="social-content">
           {tab === 'emojis' && (
-            <div className="emoji-grid">
-              {EMOJIS.map((e) => <button key={e.id} onClick={() => { send('emoji', { id: e.id }); openPanel('none'); }}>{e.char}</button>)}
+            <div className="emoji-groups">
+              {(['faces', 'hands', 'other'] as const).map((group) => (
+                <div key={group}>
+                  {group !== 'other' && <h4 className="emoji-group-title">{group === 'faces' ? 'Faces' : 'Hands'}</h4>}
+                  <div className="emoji-grid">
+                    {EMOJIS.filter((e) => e.group === group && canDrawEmoji(e.char)).map((e) => (
+                      <button key={e.id} onClick={() => { send('emoji', { id: e.id }); openPanel('none'); }}>{e.char}</button>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
           {tab === 'messages' && (

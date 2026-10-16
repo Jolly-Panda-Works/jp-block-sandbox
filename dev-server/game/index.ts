@@ -863,11 +863,25 @@ function randomAppearance(rng: () => number): Appearance {
 
 // ---------- shared/social.ts ----------
 /** Emoji shown above a character's head. */
-const EMOJIS = [
-  { id: 'smile', char: '😊' }, { id: 'heart', char: '❤️' }, { id: 'thumbs', char: '👍' },
-  { id: 'laugh', char: '😂' }, { id: 'wow', char: '😮' }, { id: 'wave', char: '👋' },
+/**
+ * Emoji bubbles: the six originals (ids kept for compatibility) plus every yellow emotion face and the
+ * hand gestures (offensive ones left out). Other ids are derived from the code points, e.g. "u1f600".
+ */
+const LEGACY = [
+  { id: 'smile', char: '😊', group: 'faces' }, { id: 'heart', char: '❤️', group: 'other' }, { id: 'thumbs', char: '👍', group: 'hands' },
+  { id: 'laugh', char: '😂', group: 'faces' }, { id: 'wow', char: '😮', group: 'faces' }, { id: 'wave', char: '👋', group: 'hands' },
 ] as const;
-type EmojiId = typeof EMOJIS[number]['id'];
+const FACE_CHARS = ["😀", "😃", "😄", "😁", "😆", "😅", "🤣", "🙂", "🙃", "🫠", "😉", "😇", "🥰", "😍", "🤩", "😘", "😗", "☺️", "😚", "😙", "🥲", "😋", "😛", "😜", "🤪", "😝", "🤑", "🤗", "🤭", "🫢", "🫣", "🤫", "🤔", "🫡", "🤐", "🤨", "😐", "😑", "😶", "🫥", "😶\u200d🌫️", "😏", "😒", "🙄", "😬", "😮\u200d💨", "🤥", "🫨", "😌", "😔", "😪", "🤤", "😴", "😷", "🤒", "🤕", "🤢", "🤮", "🤧", "🥵", "🥶", "🥴", "😵", "😵\u200d💫", "🤯", "🤠", "🥳", "🥸", "😎", "🤓", "🧐", "😕", "🫤", "😟", "🙁", "☹️", "😯", "😲", "😳", "🥺", "🥹", "😦", "😧", "😨", "😰", "😥", "😢", "😭", "😱", "😖", "😣", "😞", "😓", "😩", "😫", "🥱", "😤", "😡", "😠", "🤬"];
+const HAND_CHARS = ["🤚", "🖐️", "✋", "🖖", "🫱", "🫲", "🫳", "🫴", "👌", "🤌", "🤏", "✌️", "🤞", "🫰", "🤟", "🤘", "🤙", "👈", "👉", "👆", "👇", "☝️", "🫵", "👎", "✊", "👊", "🤛", "🤜", "👏", "🙌", "🫶", "👐", "🤲", "🤝", "🙏", "💪"];
+const emojiIdOf = (ch: string) => `u${[...ch].map((c) => c.codePointAt(0)!.toString(16)).filter((h) => h !== 'fe0f').join('_')}`;
+type EmojiGroup = 'faces' | 'hands' | 'other';
+interface EmojiDef { id: string; char: string; group: EmojiGroup }
+const EMOJIS: readonly EmojiDef[] = [
+  ...LEGACY,
+  ...FACE_CHARS.map((char) => ({ id: emojiIdOf(char), char, group: 'faces' as const })),
+  ...HAND_CHARS.map((char) => ({ id: emojiIdOf(char), char, group: 'hands' as const })),
+];
+type EmojiId = string;
 
 /** Animated emotes. */
 const EMOTES = [

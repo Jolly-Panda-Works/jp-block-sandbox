@@ -7,6 +7,7 @@ import { useGame } from '../state/store';
 import { animalStates } from '../net/network';
 import { now } from './animState';
 import { inView } from './cull';
+import { useLabelVisibility } from './labelVisibility';
 import { mergeBoxArrays } from './mergeBoxes';
 import { isNight } from '@jp/blocksy-shared';
 import { currentClock } from '../net/network';
@@ -156,11 +157,16 @@ const colorOf = (c: string, pal: AnimalColors) => (c === 'M' ? pal.main : c === 
 
 function AnimalBubble({ id }: { id: string }) {
   const bubble = useGame((s) => s.bubbles[id]);
+  const anchor = useRef<THREE.Group>(null);
+  const box = useRef<HTMLDivElement>(null);
+  useLabelVisibility(anchor, box);
   if (!bubble || bubble.until < now()) return null;
   return (
-    <Html position={[0, 1.4, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
-      <div className="bubble">{bubble.emoji ?? bubble.text}</div>
-    </Html>
+    <group ref={anchor} position={[0, 1.4, 0]}>
+      <Html center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
+        <div className="bubble label-fade" ref={box}>{bubble.emoji ?? bubble.text}</div>
+      </Html>
+    </group>
   );
 }
 

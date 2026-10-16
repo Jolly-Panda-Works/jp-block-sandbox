@@ -356,3 +356,8 @@ details summary { cursor: pointer; text-align: left; }
 /* (the island card and the ⚙️ settings button stay) */
 .hud.free-cam .top-buttons button:not(.settings-btn), .hud.free-cam .crosshair, .hud.free-cam .prompt,
 .hud.free-cam .hints, .hud.free-cam .mode, .hud.free-cam .hotbar, .hud.free-cam .hands, .hud.free-cam .click-to-play { display: none !important; }
+
+/* Labels fade when they go out of range or behind something */
+.label, .label-fade { transition: opacity 0.25s ease, visibility 0.25s; }
+.emoji-groups { max-height: 46vh; overflow-y: auto; padding-right: 4px; }
+.emoji-group-title { margin: 8px 0 4px; font-size: 13px; color: var(--sub); }
